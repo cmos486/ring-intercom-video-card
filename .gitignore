@@ -1,0 +1,16 @@
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Node (por si en el futuro se mete build tooling)
+node_modules/
+package-lock.json
+yarn.lock
+dist/
+
+# Logs y backups
+*.log
+*.bak
+*.orig
