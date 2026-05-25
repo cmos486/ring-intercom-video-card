@@ -9,6 +9,7 @@ Custom Lovelace card with **two-way audio + video** for Ring Intercom Video.
 - 🔓 Open door button (uses native `lock.unlock` or any custom service)
 - 📵 Hang up button
 - 🛠 Visual editor with entity pickers
+- 🌍 Multi-language UI (Spanish, English, Catalan) with auto-detection
 - 🔌 Companion to the [ring-intercom-video](https://github.com/cmos486/ring-intercom-video) custom component
 
 ## Requirements
@@ -16,4 +17,4 @@ Custom Lovelace card with **two-way audio + video** for Ring Intercom Video.
 - HTTPS access to Home Assistant (browsers require it for microphone access)
 - The [ring-intercom-video](https://github.com/cmos486/ring-intercom-video) custom integration installed and working
 
-See the README for full setup instructions.
+See the README for full setup instructions, Browser Mod auto-popup integration, and YAML examples.

@@ -17,6 +17,7 @@ This is the **frontend card**. It needs the companion backend custom integration
 - 🔓 **Open door** button (uses Ring's native `lock.unlock` or any custom service)
 - 📵 **Hang up** button (clean session teardown, releases mic and camera)
 - 🛠 **Visual editor** with entity pickers — no YAML needed
+- 🌍 **Multi-language UI** with auto-detection: Spanish, English, Catalan
 - 🔌 Pure browser-side WebRTC, no `go2rtc`, no extra add-ons, no transcoding server
 - 🌐 Works on desktop and mobile browsers (with HTTPS)
 
@@ -36,12 +37,12 @@ Install the backend integration first, verify it created a `camera.*` entity for
 
 ### 🌐 HTTPS access to Home Assistant
 
-Browsers require a **secure context** to access the microphone (`getUserMedia`). If you access HA over plain HTTP (`http://192.168.x.x:8123`), the microphone will not work and you'll get a one-way audio at best.
+Browsers require a **secure context** to access the microphone (`getUserMedia`). If you access HA over plain HTTP (`http://192.168.x.x:8123`), the microphone will not work and you'll get one-way audio at best.
 
 You need any of:
 - 🏠 Nabu Casa Home Assistant Cloud (HTTPS automatic)
-- 🔐 A reverse proxy with Let's Encrypt (nginx, Caddy, Traefik...)
-- 🔒 Some equivalent HTTPS solution
+- 🔐 A reverse proxy with Let's Encrypt (nginx, Caddy, Traefik, Nginx Proxy Manager...)
+- 🔒 Native HA HTTPS with a valid certificate
 
 ### 📋 Other requirements
 
@@ -55,7 +56,7 @@ You need any of:
 
 ### 🟢 Via HACS (recommended)
 
-Step by step, with screenshots-equivalent instructions:
+Step by step:
 
 #### 1️⃣ Make sure HACS is installed
 
@@ -89,7 +90,7 @@ If this step doesn't produce a camera entity, fix that first — the card will n
 To confirm it loaded, open the browser console (F12) — you should see a blue banner like:
 
 ```
- RING-INTERCOM-VIDEO-CARD  v1.0.0
+ RING-INTERCOM-VIDEO-CARD  v1.1.0
 ```
 
 ### 🔧 Manual installation (alternative)
@@ -112,9 +113,10 @@ If you prefer not to use HACS:
 3. Click **➕ Add Card**
 4. Search for **Ring Intercom Video Card** in the picker
 5. The **visual editor** will open:
-   - 📹 **Camera entity**: pick the `camera.*` created by the backend integration. The picker auto-suggests intercom cameras.
-   - 🔓 **Lock entity** (optional): pick the `lock.*` provided by the Ring integration to enable the "Open door" button.
-   - ⚙️ **Advanced** (toggle): instead of a simple lock, you can call any service (script, automation, switch...) when "Open door" is pressed.
+   - 📹 **Camera entity**: pick the `camera.*` created by the backend integration
+   - 🔓 **Lock entity** (optional): pick the `lock.*` provided by the Ring integration to enable the "Open door" button
+   - 🌍 **Language** (optional): override the auto-detected language (defaults to your HA language)
+   - ⚙️ **Advanced** (toggle): instead of a simple lock, you can call any service when "Open door" is pressed
 6. Click **Save**
 
 ---
@@ -131,13 +133,14 @@ The visual editor covers the typical cases, but here's the full schema for refer
 | `open_door_action.service` | string | — | Service to call (e.g. `script.turn_on`, `automation.trigger`) |
 | `open_door_action.entity_id` | string | — | Entity passed as `entity_id` to the service |
 | `open_door_action.data` | object | — | Additional service data |
+| `language` | string | ❌ No | Force UI language: `es`, `en`, `ca`. If omitted, follows Home Assistant's language. |
 
 ### 📝 Example — Simple (just lock)
 
 ```yaml
 type: custom:ring-intercom-video-card
 entity: camera.entrada_principal_video_camera
-lock_entity: lock.entrada_principal_video
+lock_entity: lock.entrada_principal_video_lock
 ```
 
 ### 📝 Example — Advanced (custom service)
@@ -148,6 +151,15 @@ entity: camera.entrada_principal_video_camera
 open_door_action:
   service: script.turn_on
   entity_id: script.abrir_puerta
+```
+
+### 📝 Example — Forced language
+
+```yaml
+type: custom:ring-intercom-video-card
+entity: camera.entrada_principal_video_camera
+lock_entity: lock.entrada_principal_video_lock
+language: ca
 ```
 
 ### 📝 Example — No door button
@@ -161,25 +173,172 @@ entity: camera.entrada_principal_video_camera
 
 ---
 
+## 🌍 Internationalization
+
+The card UI is available in:
+
+| Code | Language |
+|---|---|
+| 🇪🇸 `es` | Español |
+| 🇬🇧 `en` | English |
+| 🇪🇸 `ca` | Català |
+
+**Auto-detection**: by default, the card reads `hass.locale.language` (or `hass.language`) and picks the matching translation. If your HA is set to Spanish, the card shows Spanish. If it's set to Italian (not supported yet), it falls back to English.
+
+**Manual override**: set the `language` option in the card config to force a specific language regardless of HA.
+
+Want another language? PRs welcome — add a new block to the `TRANSLATIONS` constant in `ring-intercom-video-card.js`.
+
+---
+
 ## 🎬 How to use it
 
 When someone rings the intercom or you just want to check the door:
 
 1. 🛎️ Intercom rings (or you decide to peek)
-2. 👆 Click **📞 Conectar** in the card
+2. 👆 Click **📞 Pick up / Descolgar / Despenjar**
 3. 🎤 Browser asks for microphone permission → **Allow** (first time only)
 4. ⏳ Wait a second or two — you'll see `PC state: connected` in the overlay
-5. 📺 Live video appears, the green **PULSAR PARA HABLAR** button activates
+5. 📺 Live video appears, the green push-to-talk button activates
 6. 🗣️ **Hold** the green button to speak through the intercom
-7. 🔓 Click **Abrir puerta** to unlock the door
-8. 📵 Click **Colgar** when you're done to release the session
+7. 🔓 Click **🔓 Open door / Abrir puerta / Obrir porta** to unlock the door
+8. 📵 Click **📵 Hang up / Colgar / Penjar** when you're done
 
 ### 💡 Tips
 
 - The **microphone is muted by default** — you have to hold the button to send audio. Release it as soon as you stop talking to avoid echo.
 - The **audio from the door is always heard** while connected — you don't need to press anything to hear them.
-- If you **forget to hang up**, the indoor intercom handset may stay "occupied" and not work normally. Always click **📵 Colgar** when you finish.
+- If you **forget to hang up**, the indoor intercom handset may stay "occupied" and not work normally. Always hang up when you finish.
 - The card uses **native browser WebRTC** — latency is typically under 300ms.
+
+---
+
+## 🪟 Auto-popup on incoming call (Browser Mod integration)
+
+A common use case: when someone rings the intercom, **automatically show the card as a popup** on your wall panel / tablet without the user having to navigate to a specific dashboard.
+
+This is achieved with the [browser_mod](https://github.com/thomasloven/hass-browser_mod) custom integration.
+
+### 🧩 Requirements
+
+- 📱 **Browser Mod** installed via HACS
+- 🌐 The target device (tablet, wall panel...) needs to be registered as a browser in Browser Mod with a known `browser_id` (e.g. `wallpanel`)
+- 🛎️ A trigger entity from your intercom — typically `event.<your_intercom>_timbre_de_la_puerta` or similar `binary_sensor.*_ding` from the Ring integration
+
+### ⚙️ Setup steps
+
+#### 1. Install Browser Mod from HACS
+
+HACS → **Integrations** → search **Browser Mod** → Download → Restart HA → Settings → Devices & services → **Add integration** → Browser Mod.
+
+#### 2. Register your device as a browser
+
+On the target device (e.g. wall panel tablet):
+
+1. Open HA in the app or browser
+2. Navigate to **menu → Browser Mod** (or directly to `/browser-mod`)
+3. Enter a recognizable name in **Browser ID** (e.g. `wallpanel`)
+4. Activate ☑️ **Register**, ☑️ **Camera**, ☑️ **Microphone**
+5. Save
+
+#### 3. Create the popup automation
+
+Use this automation as a starting point. Replace entity IDs with your own:
+
+```yaml
+alias: popup_intercom_llamada_wallpanel
+description: >
+  Shows the intercom card as a popup on the wall panel when the doorbell rings.
+  Auto-closes after 60s of inactivity.
+mode: restart
+trigger:
+  - platform: state
+    entity_id: event.entrada_principal_video_timbre_de_la_puerta
+action:
+  - service: browser_mod.popup
+    data:
+      browser_id:
+        - wallpanel
+      title: Llamada en el portero
+      content:
+        type: custom:ring-intercom-video-card
+        entity: camera.entrada_principal_video_camera
+        lock_entity: lock.entrada_principal_video_lock
+      dismissable: true
+      autoclose: false
+      timeout: 60000
+      style: "--popup-min-width: 480px; --popup-max-width: 520px;"
+```
+
+#### 4. Wake up the screen (optional but recommended)
+
+If your tablet's screen is off when the doorbell rings, you'll want to wake it up first. The HA Companion app supports a command for this:
+
+```yaml
+alias: activar_pantalla_wallpanel_por_timbre
+description: Wake up wallpanel screen when doorbell rings
+trigger:
+  - platform: state
+    entity_id: event.entrada_principal_video_timbre_de_la_puerta
+action:
+  - service: notify.mobile_app_wallpanel
+    data:
+      message: command_screen_on
+```
+
+> Note: `notify.mobile_app_wallpanel` is created automatically when you install the HA Companion app on the tablet and name it `wallpanel`.
+
+### 🎨 Customizing the popup
+
+#### Centering / sizing
+
+The `style:` field accepts CSS variables specific to Browser Mod:
+
+```yaml
+style: |
+  --popup-min-width: 480px;
+  --popup-max-width: 520px;
+  --popup-border-radius: 16px;
+```
+
+#### Show only at certain hours
+
+If you don't want the popup to appear at night:
+
+```yaml
+condition:
+  - condition: time
+    after: "06:00:00"
+    before: "23:00:00"
+```
+
+#### Send notification to phone when no one's home
+
+Combine the popup with a `notify.*` to your phone:
+
+```yaml
+action:
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: person.you
+            state: home
+        sequence:
+          - service: browser_mod.popup
+            data:
+              browser_id:
+                - wallpanel
+              # ... (popup config above)
+      - conditions:
+          - condition: state
+            entity_id: person.you
+            state: not_home
+        sequence:
+          - service: notify.mobile_app_your_phone
+            data:
+              title: "🛎️ Doorbell"
+              message: "Someone is at the door"
+```
 
 ---
 
@@ -206,7 +365,7 @@ This is the same WebRTC machinery the official HA Ring integration already uses 
 
 ## 🧯 Troubleshooting
 
-### ❓ "Pidiendo microfono..." hangs or fails
+### ❓ "Requesting microphone..." hangs or fails
 
 The browser is rejecting the microphone request:
 
@@ -248,6 +407,17 @@ You're caching an old copy:
 - If using `open_door_action`: check the service exists and works standalone
 - Look at HA logs around the time you pressed the button
 
+### 🪟 Browser_mod popup doesn't appear
+
+- Verify `sensor.<browser_id>_browser_id` state is the expected name (not `unavailable`)
+- If you changed the HA URL (e.g. HTTP → HTTPS), Browser Mod loses the registration. Re-register on the device after changing URLs
+- Make sure the target browser is active and visible (`sensor.<browser_id>_browser_visibility` should be `visible` for the popup to render). If the screen is off, send `command_screen_on` first
+
+### 🌍 Card shows in English when my HA is in another language
+
+- If the language code is unsupported, the card falls back to English. Supported: `es`, `en`, `ca`. PRs welcome to add more
+- You can force a language by setting `language: es` (or `en`, `ca`) in the card config
+
 ---
 
 ## 🤝 Contributing
@@ -259,12 +429,15 @@ Pull requests and issues welcome! When reporting a bug please include:
 - 🖥️ Console logs from the card (search for `[ring-intercom-video-card]`)
 - 🎟️ A description of what you expected vs. what happened
 
+To add a new language, edit `ring-intercom-video-card.js` and add a new key to the `TRANSLATIONS` constant. All keys must match the existing ones — see `en` for the canonical reference.
+
 ---
 
 ## 🙏 Credits
 
 - 📦 Built on top of [python-ring-doorbell](https://github.com/python-ring-doorbell/python-ring-doorbell) and the [HA Ring integration](https://www.home-assistant.io/integrations/ring/)
 - 🤝 Companion to [ring-intercom-video](https://github.com/cmos486/ring-intercom-video) by the same author
+- 🪟 Auto-popup feature uses [browser_mod](https://github.com/thomasloven/hass-browser_mod) by [@thomasloven](https://github.com/thomasloven)
 
 ---
 

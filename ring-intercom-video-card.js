@@ -1,5 +1,5 @@
 /**
- * Ring Intercom Video Card - v1.0.0
+ * Ring Intercom Video Card - v1.1.0
  *
  * Two-way audio + video Lovelace card for Ring Intercom Video.
  * Companion to the ring-intercom-video custom component.
@@ -12,24 +12,148 @@
  *     service: script.turn_on
  *     entity_id: script.xxx
  *     data: {...}
+ *   language: es|en|ca                    # optional, overrides HA language auto-detection
  *
  * Legacy schema (auto-migrated):
  *   open_door:
  *     service: ...
  *     entity_id: ...
  *
- * Requirements:
- * - HTTPS (for getUserMedia microphone access)
- * - ring_intercom_camera custom component
- *
  * Repo: https://github.com/cmos486/ring-intercom-video-card
  * License: Apache-2.0
  */
 
-const CARD_VERSION = '1.0.0';
+const CARD_VERSION = '1.1.0';
 const CARD_TAG = 'ring-intercom-video-card';
 const EDITOR_TAG = 'ring-intercom-video-card-editor';
 const LOG_PREFIX = '[ring-intercom-video-card]';
+
+// ---------- i18n ----------
+
+const TRANSLATIONS = {
+  es: {
+    idle: 'Inactivo',
+    connecting: 'Conectando...',
+    requesting_mic: 'Pidiendo microfono...',
+    sending_offer: 'Enviando offer a HA...',
+    session: 'Sesion HA:',
+    answer_received: 'Answer recibido',
+    pc_state: 'Estado PC:',
+    ptt_button: 'PULSAR PARA HABLAR',
+    pick_up: 'Descolgar',
+    open_door: 'Abrir puerta',
+    hang_up: 'Colgar',
+    door_opened: 'Puerta abierta',
+    hung_up: 'Colgado',
+    disconnected: 'Desconectado',
+    error_opening: 'Error abriendo:',
+    door_not_configured: 'Abrir puerta no configurado',
+    error_service: 'service mal formado',
+    error_prefix: 'Error:',
+    error_ha: 'Error de HA:',
+    error_answer: 'Error en answer:',
+    // Editor labels
+    editor_camera_label: 'Entidad camara (requerido)',
+    editor_camera_help: 'Entidad camara del componente Ring Intercom Video.',
+    editor_lock_label: 'Entidad cerradura (opcional)',
+    editor_lock_help: 'Si se configura, aparece el boton "Abrir puerta" y llama a lock.unlock en esta entidad.',
+    editor_advanced_toggle: 'Avanzado: accion personalizada para abrir puerta',
+    editor_advanced_help: 'Configura cualquier llamada de servicio para el boton "Abrir puerta". Dejarlo vacio deshabilita el boton.',
+    editor_service_label: 'Servicio (ej. lock.unlock, script.turn_on)',
+    editor_action_entity_label: 'Entidad (opcional)',
+    editor_action_entity_help: 'Si el servicio necesita un entity_id, ponlo aqui.',
+    editor_language_label: 'Idioma (opcional, sobrescribe el de HA)',
+    editor_language_help: 'Idioma de los textos del card. Si se deja vacio, se usa el idioma de Home Assistant.',
+  },
+  en: {
+    idle: 'Idle',
+    connecting: 'Connecting...',
+    requesting_mic: 'Requesting microphone...',
+    sending_offer: 'Sending offer to HA...',
+    session: 'HA session:',
+    answer_received: 'Answer received',
+    pc_state: 'PC state:',
+    ptt_button: 'PUSH TO TALK',
+    pick_up: 'Pick up',
+    open_door: 'Open door',
+    hang_up: 'Hang up',
+    door_opened: 'Door opened',
+    hung_up: 'Hung up',
+    disconnected: 'Disconnected',
+    error_opening: 'Error opening:',
+    door_not_configured: 'Open door not configured',
+    error_service: 'malformed service',
+    error_prefix: 'Error:',
+    error_ha: 'HA error:',
+    error_answer: 'Error in answer:',
+    editor_camera_label: 'Camera entity (required)',
+    editor_camera_help: 'Camera entity from the Ring Intercom Video component.',
+    editor_lock_label: 'Lock entity (optional)',
+    editor_lock_help: 'If set, an "Open door" button appears and calls lock.unlock on this entity.',
+    editor_advanced_toggle: 'Advanced: custom open-door action',
+    editor_advanced_help: 'Configure any service call for the "Open door" button. Leaving it empty disables the button.',
+    editor_service_label: 'Service (e.g. lock.unlock, script.turn_on)',
+    editor_action_entity_label: 'Entity (optional)',
+    editor_action_entity_help: 'If your service needs an entity_id, set it here.',
+    editor_language_label: 'Language (optional, overrides HA language)',
+    editor_language_help: 'Language for card texts. Leave empty to use Home Assistant language.',
+  },
+  ca: {
+    idle: 'Inactiu',
+    connecting: 'Connectant...',
+    requesting_mic: 'Demanant microfon...',
+    sending_offer: 'Enviant oferta a HA...',
+    session: 'Sessio HA:',
+    answer_received: 'Resposta rebuda',
+    pc_state: 'Estat PC:',
+    ptt_button: 'PREMER PER PARLAR',
+    pick_up: 'Despenjar',
+    open_door: 'Obrir porta',
+    hang_up: 'Penjar',
+    door_opened: 'Porta oberta',
+    hung_up: 'Penjat',
+    disconnected: 'Desconnectat',
+    error_opening: 'Error obrint:',
+    door_not_configured: 'Obrir porta no configurat',
+    error_service: 'servei mal format',
+    error_prefix: 'Error:',
+    error_ha: "Error d'HA:",
+    error_answer: 'Error a la resposta:',
+    editor_camera_label: 'Entitat camera (requerit)',
+    editor_camera_help: 'Entitat camera del component Ring Intercom Video.',
+    editor_lock_label: 'Entitat pany (opcional)',
+    editor_lock_help: 'Si es configura, apareix el boto "Obrir porta" i crida lock.unlock en aquesta entitat.',
+    editor_advanced_toggle: 'Avancat: accio personalitzada per obrir la porta',
+    editor_advanced_help: 'Configura qualsevol crida de servei per al boto "Obrir porta". Deixar-ho buit desactiva el boto.',
+    editor_service_label: 'Servei (p.ex. lock.unlock, script.turn_on)',
+    editor_action_entity_label: 'Entitat (opcional)',
+    editor_action_entity_help: 'Si el servei necessita un entity_id, posa-l\'hi aqui.',
+    editor_language_label: 'Idioma (opcional, sobreescriu el d\'HA)',
+    editor_language_help: "Idioma dels textos del card. Si es deixa buit, s'usa l'idioma de Home Assistant.",
+  },
+};
+
+const LANGUAGE_NAMES = {
+  '': 'Auto (Home Assistant)',
+  es: 'Espanol',
+  en: 'English',
+  ca: 'Catala',
+};
+
+function detectLanguage(hass, configLang) {
+  // 1. Explicit config language wins
+  if (configLang && TRANSLATIONS[configLang]) return configLang;
+  // 2. HA locale language
+  const haLang = (hass && (hass.locale?.language || hass.language)) || '';
+  const short = haLang.split('-')[0].toLowerCase();
+  if (TRANSLATIONS[short]) return short;
+  // 3. Fallback
+  return 'en';
+}
+
+function t(lang, key) {
+  return TRANSLATIONS[lang]?.[key] ?? TRANSLATIONS.en[key] ?? key;
+}
 
 // ---------- Helpers ----------
 
@@ -51,8 +175,6 @@ function resolveOpenDoorAction(config) {
   return null;
 }
 
-// Force HA to load ha-entity-picker / ha-textfield by triggering the
-// built-in entities-card config element. Standard community technique.
 async function loadHaComponents() {
   if (customElements.get('ha-entity-picker') && customElements.get('ha-textfield')) {
     return;
@@ -82,6 +204,7 @@ class RingIntercomVideoCard extends HTMLElement {
     this._connected = false;
     this._connecting = false;
     this._pendingCandidates = [];
+    this._lang = 'en';
   }
 
   static async getConfigElement() {
@@ -112,11 +235,23 @@ class RingIntercomVideoCard extends HTMLElement {
       throw new Error('You need to define an entity (camera.xxx)');
     }
     this._config = migrateConfig(config);
+    this._refreshLang();
     this._render();
   }
 
   set hass(hass) {
+    const langBefore = this._lang;
     this._hass = hass;
+    this._refreshLang();
+    // Re-render if language changed and we already rendered once
+    if (langBefore !== this._lang && this.shadowRoot.querySelector('.container')) {
+      this._render();
+    }
+  }
+
+  _refreshLang() {
+    if (!this._config) return;
+    this._lang = detectLanguage(this._hass, this._config.language);
   }
 
   getCardSize() {
@@ -124,6 +259,8 @@ class RingIntercomVideoCard extends HTMLElement {
   }
 
   _render() {
+    const T = (key) => t(this._lang, key);
+
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
@@ -161,14 +298,14 @@ class RingIntercomVideoCard extends HTMLElement {
         <div class="container">
           <div class="video-wrap">
             <video id="video" autoplay playsinline></video>
-            <div class="overlay" id="status">Idle</div>
+            <div class="overlay" id="status">${T('idle')}</div>
           </div>
           <div class="controls">
-            <button class="ptt" id="ptt" disabled>PULSAR PARA HABLAR</button>
+            <button class="ptt" id="ptt" disabled>${T('ptt_button')}</button>
             <div class="row">
-              <button class="action-btn start-btn" id="start">📞 Conectar</button>
-              <button class="action-btn door-btn" id="door" disabled>🔓 Abrir puerta</button>
-              <button class="action-btn hangup-btn" id="hangup" disabled>📵 Colgar</button>
+              <button class="action-btn start-btn" id="start">📞 ${T('pick_up')}</button>
+              <button class="action-btn door-btn" id="door" disabled>🔓 ${T('open_door')}</button>
+              <button class="action-btn hangup-btn" id="hangup" disabled>📵 ${T('hang_up')}</button>
             </div>
           </div>
         </div>
@@ -205,32 +342,34 @@ class RingIntercomVideoCard extends HTMLElement {
   }
 
   async _openDoor() {
+    const T = (key) => t(this._lang, key);
     const action = resolveOpenDoorAction(this._config);
-    if (!action || !action.service) { this._status('Abrir puerta no configurado'); return; }
+    if (!action || !action.service) { this._status(T('door_not_configured')); return; }
     const [domain, service] = action.service.split('.');
-    if (!domain || !service) { this._status('service mal formado'); return; }
+    if (!domain || !service) { this._status(T('error_service')); return; }
     try {
       const data = {};
       if (action.entity_id) data.entity_id = action.entity_id;
       Object.assign(data, action.data || {});
       await this._hass.callService(domain, service, data);
-      this._status('Puerta abierta');
+      this._status(T('door_opened'));
       const doorBtn = this.shadowRoot.getElementById('door');
       const originalBg = doorBtn.style.background;
       doorBtn.style.background = '#2e7d32';
       setTimeout(() => { doorBtn.style.background = originalBg; }, 800);
     } catch (err) {
-      this._status(`Error abriendo: ${err.message}`);
+      this._status(`${T('error_opening')} ${err.message}`);
       console.error(LOG_PREFIX, 'openDoor failed:', err);
     }
   }
 
   async _connect() {
+    const T = (key) => t(this._lang, key);
     if (this._connecting || this._connected) return;
     this._connecting = true;
     this._sessionId = null;
     this._pendingCandidates = [];
-    this._status('Conectando...');
+    this._status(T('connecting'));
     const startBtn = this.shadowRoot.getElementById('start');
     const hangupBtn = this.shadowRoot.getElementById('hangup');
     const doorBtn = this.shadowRoot.getElementById('door');
@@ -238,7 +377,7 @@ class RingIntercomVideoCard extends HTMLElement {
     hangupBtn.disabled = false;
     if (resolveOpenDoorAction(this._config)) doorBtn.disabled = false;
     try {
-      this._status('Pidiendo microfono...');
+      this._status(T('requesting_mic'));
       this._localStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         video: false,
@@ -256,7 +395,7 @@ class RingIntercomVideoCard extends HTMLElement {
       };
       this._pc.onconnectionstatechange = () => {
         if (!this._pc) return;
-        this._status(`PC state: ${this._pc.connectionState}`);
+        this._status(`${T('pc_state')} ${this._pc.connectionState}`);
         if (this._pc.connectionState === 'connected') {
           this._connected = true;
           const pttBtn = this.shadowRoot.getElementById('ptt');
@@ -275,13 +414,13 @@ class RingIntercomVideoCard extends HTMLElement {
       const offer = await this._pc.createOffer();
       await this._pc.setLocalDescription(offer);
       await new Promise((r) => setTimeout(r, 100));
-      this._status('Enviando offer a HA...');
+      this._status(T('sending_offer'));
       this._unsubscribe = await this._hass.connection.subscribeMessage(
         (msg) => this._onSignalMessage(msg),
         { type: 'camera/webrtc/offer', entity_id: this._config.entity, offer: this._pc.localDescription.sdp }
       );
     } catch (err) {
-      this._status(`Error: ${err.message}`);
+      this._status(`${T('error_prefix')} ${err.message}`);
       console.error(LOG_PREFIX, 'Error:', err);
       this._teardown();
     } finally {
@@ -307,20 +446,21 @@ class RingIntercomVideoCard extends HTMLElement {
   }
 
   async _onSignalMessage(msg) {
+    const T = (key) => t(this._lang, key);
     console.log(LOG_PREFIX, 'Signal msg:', msg);
     if (msg.type === 'session') {
       this._sessionId = msg.session_id;
-      this._status(`Sesion HA: ${this._sessionId.slice(0, 8)}...`);
+      this._status(`${T('session')} ${this._sessionId.slice(0, 8)}...`);
       this._flushPendingCandidates();
     } else if (msg.type === 'answer') {
-      this._status('Answer recibido');
+      this._status(T('answer_received'));
       try { await this._pc.setRemoteDescription({ type: 'answer', sdp: msg.answer }); }
-      catch (err) { this._status(`Error en answer: ${err.message}`); console.error(LOG_PREFIX, 'setRemoteDescription failed:', err); }
+      catch (err) { this._status(`${T('error_answer')} ${err.message}`); console.error(LOG_PREFIX, 'setRemoteDescription failed:', err); }
     } else if (msg.type === 'candidate') {
       try { const c = msg.candidate; await this._pc.addIceCandidate({ candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex }); }
       catch (err) { console.warn(LOG_PREFIX, 'addIceCandidate failed:', err); }
     } else if (msg.type === 'error') {
-      this._status(`Error de HA: ${msg.message || msg.code}`);
+      this._status(`${T('error_ha')} ${msg.message || msg.code}`);
       console.error(LOG_PREFIX, 'Server error:', msg);
     } else {
       console.log(LOG_PREFIX, 'Unhandled msg:', msg);
@@ -334,6 +474,7 @@ class RingIntercomVideoCard extends HTMLElement {
   }
 
   _teardown() {
+    const T = (key) => t(this._lang, key);
     const wasConnected = this._connected;
     this._connected = false;
     const video = this.shadowRoot.getElementById('video');
@@ -354,7 +495,7 @@ class RingIntercomVideoCard extends HTMLElement {
     if (hangupBtn) hangupBtn.disabled = true;
     const doorBtn = this.shadowRoot.getElementById('door');
     if (doorBtn) doorBtn.disabled = true;
-    this._status(wasConnected ? 'Colgado' : 'Desconectado');
+    this._status(wasConnected ? T('hung_up') : T('disconnected'));
   }
 
   disconnectedCallback() {
@@ -370,6 +511,7 @@ class RingIntercomVideoCardEditor extends HTMLElement {
     this._config = {};
     this._showAdvanced = false;
     this._isConnected = false;
+    this._lang = 'en';
   }
 
   connectedCallback() {
@@ -380,12 +522,14 @@ class RingIntercomVideoCardEditor extends HTMLElement {
   setConfig(config) {
     this._config = migrateConfig(config || {});
     if (this._config.open_door_action) this._showAdvanced = true;
+    this._refreshLang();
     this._renderIfReady();
   }
 
   set hass(hass) {
     const firstHass = !this._hass;
     this._hass = hass;
+    this._refreshLang();
     if (firstHass) {
       this._renderIfReady();
     } else {
@@ -393,6 +537,10 @@ class RingIntercomVideoCardEditor extends HTMLElement {
         el.hass = hass;
       });
     }
+  }
+
+  _refreshLang() {
+    this._lang = detectLanguage(this._hass, this._config.language);
   }
 
   async _renderIfReady() {
@@ -416,6 +564,7 @@ class RingIntercomVideoCardEditor extends HTMLElement {
     } else {
       this._config = { ...this._config, [key]: value };
     }
+    this._refreshLang();
     this._emitChange();
   }
 
@@ -470,7 +619,28 @@ class RingIntercomVideoCardEditor extends HTMLElement {
     return field;
   }
 
+  _makeLanguageSelect({ value, label, onChange }) {
+    const wrapper = document.createElement('div');
+    const select = document.createElement('ha-select');
+    select.label = label;
+    select.value = value || '';
+    select.style.width = '100%';
+    select.addEventListener('selected', (e) => { onChange(e.target.value); });
+    select.addEventListener('closed', (e) => e.stopPropagation());
+
+    Object.entries(LANGUAGE_NAMES).forEach(([code, name]) => {
+      const item = document.createElement('mwc-list-item');
+      item.value = code;
+      item.textContent = name;
+      select.appendChild(item);
+    });
+
+    wrapper.appendChild(select);
+    return wrapper;
+  }
+
   _render() {
+    const T = (key) => t(this._lang, key);
     while (this.firstChild) this.removeChild(this.firstChild);
 
     const c = this._config;
@@ -480,35 +650,47 @@ class RingIntercomVideoCardEditor extends HTMLElement {
     const container = document.createElement('div');
     container.style.cssText = 'display:flex; flex-direction:column; gap:16px; padding:8px 0;';
 
+    // Camera entity
     const cameraField = document.createElement('div');
     cameraField.appendChild(this._makeEntityPicker({
       value: c.entity,
-      label: 'Camera entity (required)',
+      label: T('editor_camera_label'),
       domain: 'camera',
       onChange: (v) => this._setConfigValue('entity', v),
     }));
-    cameraField.appendChild(this._makeHelpText('Camera entity from the Ring Intercom Video component.'));
+    cameraField.appendChild(this._makeHelpText(T('editor_camera_help')));
     container.appendChild(cameraField);
 
     if (!adv) {
       const lockField = document.createElement('div');
       lockField.appendChild(this._makeEntityPicker({
         value: c.lock_entity,
-        label: 'Lock entity (optional)',
+        label: T('editor_lock_label'),
         domain: 'lock',
         onChange: (v) => this._setConfigValue('lock_entity', v),
       }));
-      lockField.appendChild(this._makeHelpText('If set, an "Open door" button will appear and call lock.unlock on this entity.'));
+      lockField.appendChild(this._makeHelpText(T('editor_lock_help')));
       container.appendChild(lockField);
     }
 
+    // Language selector
+    const langField = document.createElement('div');
+    langField.appendChild(this._makeLanguageSelect({
+      value: c.language || '',
+      label: T('editor_language_label'),
+      onChange: (v) => this._setConfigValue('language', v),
+    }));
+    langField.appendChild(this._makeHelpText(T('editor_language_help')));
+    container.appendChild(langField);
+
+    // Advanced toggle
     const toggle = document.createElement('div');
     toggle.style.cssText = 'display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; padding:8px 0; color:var(--primary-text-color); font-size:14px;';
     const chevron = document.createElement('span');
     chevron.style.cssText = `display:inline-block; transition:transform 0.2s; transform:${adv ? 'rotate(90deg)' : 'rotate(0deg)'};`;
     chevron.textContent = '▶';
     const tlabel = document.createElement('span');
-    tlabel.textContent = 'Advanced: custom open-door action';
+    tlabel.textContent = T('editor_advanced_toggle');
     toggle.appendChild(chevron);
     toggle.appendChild(tlabel);
     toggle.addEventListener('click', () => this._toggleAdvanced());
@@ -519,21 +701,21 @@ class RingIntercomVideoCardEditor extends HTMLElement {
       advBox.style.cssText = 'padding:12px; border:1px solid var(--divider-color, #ccc); border-radius:8px; display:flex; flex-direction:column; gap:12px;';
       const hint = document.createElement('div');
       hint.style.cssText = 'font-size:12px; color:var(--secondary-text-color); font-style:italic;';
-      hint.textContent = 'Configure any service call for the "Open door" button. Leaving these empty disables the button.';
+      hint.textContent = T('editor_advanced_help');
       advBox.appendChild(hint);
       advBox.appendChild(this._makeTextField({
         value: action.service,
-        label: 'Service (e.g. lock.unlock, script.turn_on)',
+        label: T('editor_service_label'),
         onInput: (v) => this._setActionValue('service', v),
       }));
       const entityWrap = document.createElement('div');
       entityWrap.appendChild(this._makeEntityPicker({
         value: action.entity_id,
-        label: 'Entity (optional)',
+        label: T('editor_action_entity_label'),
         domain: null,
         onChange: (v) => this._setActionValue('entity_id', v),
       }));
-      entityWrap.appendChild(this._makeHelpText('If your service needs an entity_id, set it here.'));
+      entityWrap.appendChild(this._makeHelpText(T('editor_action_entity_help')));
       advBox.appendChild(entityWrap);
       container.appendChild(advBox);
     }
