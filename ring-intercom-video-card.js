@@ -1,5 +1,5 @@
 /**
- * Ring Intercom Video Card - v1.1.0
+ * Ring Intercom Video Card - v1.1.1
  *
  * Two-way audio + video Lovelace card for Ring Intercom Video.
  * Companion to the ring-intercom-video custom component.
@@ -23,7 +23,7 @@
  * License: Apache-2.0
  */
 
-const CARD_VERSION = '1.1.0';
+const CARD_VERSION = '1.1.1';
 const CARD_TAG = 'ring-intercom-video-card';
 const EDITOR_TAG = 'ring-intercom-video-card-editor';
 const LOG_PREFIX = '[ring-intercom-video-card]';
