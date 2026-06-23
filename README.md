@@ -18,6 +18,7 @@ This is the **frontend card**. It needs the companion backend custom integration
 - 📵 **Hang up** button (clean session teardown, releases mic and camera)
 - 🛠 **Visual editor** with entity pickers — no YAML needed
 - 🌍 **Multi-language UI** with auto-detection: Spanish, English, Catalan
+- 📐 **Optional `video_max_height`** to fit small screens like the Echo Show 5
 - 🔌 Pure browser-side WebRTC, no `go2rtc`, no extra add-ons, no transcoding server
 - 🌐 Works on desktop and mobile browsers (with HTTPS)
 
@@ -90,7 +91,7 @@ If this step doesn't produce a camera entity, fix that first — the card will n
 To confirm it loaded, open the browser console (F12) — you should see a blue banner like:
 
 ```
- RING-INTERCOM-VIDEO-CARD  v1.1.0
+ RING-INTERCOM-VIDEO-CARD  v1.2.0
 ```
 
 ### 🔧 Manual installation (alternative)
@@ -134,6 +135,7 @@ The visual editor covers the typical cases, but here's the full schema for refer
 | `open_door_action.entity_id` | string | — | Entity passed as `entity_id` to the service |
 | `open_door_action.data` | object | — | Additional service data |
 | `language` | string | ❌ No | Force UI language: `es`, `en`, `ca`. If omitted, follows Home Assistant's language. |
+| `video_max_height` | string | ❌ No | Caps the video height with any CSS length (`px`, `vh`, `%`...). When set, the video uses `object-fit: contain` so it never deforms. If omitted, the video keeps its default size (no limit) — existing configs are unaffected. |
 
 ### 📝 Example — Simple (just lock)
 
@@ -161,6 +163,33 @@ entity: camera.entrada_principal_video_camera
 lock_entity: lock.entrada_principal_video_lock
 language: ca
 ```
+
+### 📝 Example — Limit video height (small screens / Echo Show 5)
+
+On small displays such as an **Echo Show 5** (480 px tall), the default `4:3` video can push the control buttons off-screen. Set `video_max_height` to cap the video so the buttons stay visible. The value accepts any CSS length and the video is letterboxed (`object-fit: contain`) so it never deforms:
+
+```yaml
+type: custom:ring-intercom-video-card
+entity: camera.entrada_principal_video_camera
+lock_entity: lock.entrada_principal_video_lock
+video_max_height: 230px   # or 50vh, etc.
+```
+
+Typical use inside a `browser_mod` popup triggered when the intercom rings:
+
+```yaml
+service: browser_mod.popup
+data:
+  title: Intercom
+  size: fullscreen
+  content:
+    type: custom:ring-intercom-video-card
+    entity: camera.entrada_principal_video_camera
+    lock_entity: lock.entrada_principal_video_lock
+    video_max_height: 230px
+```
+
+> ℹ️ This option is fully optional and backward-compatible: if you don't set it, the card renders exactly as before.
 
 ### 📝 Example — No door button
 

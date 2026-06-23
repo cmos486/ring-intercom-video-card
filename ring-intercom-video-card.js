@@ -1,5 +1,5 @@
 /**
- * Ring Intercom Video Card - v1.1.1
+ * Ring Intercom Video Card - v1.2.0
  *
  * Two-way audio + video Lovelace card for Ring Intercom Video.
  * Companion to the ring-intercom-video custom component.
@@ -13,6 +13,7 @@
  *     entity_id: script.xxx
  *     data: {...}
  *   language: es|en|ca                    # optional, overrides HA language auto-detection
+ *   video_max_height: 230px               # optional, caps video height (px, vh, %...)
  *
  * Legacy schema (auto-migrated):
  *   open_door:
@@ -23,7 +24,7 @@
  * License: Apache-2.0
  */
 
-const CARD_VERSION = '1.1.1';
+const CARD_VERSION = '1.2.0';
 const CARD_TAG = 'ring-intercom-video-card';
 const EDITOR_TAG = 'ring-intercom-video-card-editor';
 const LOG_PREFIX = '[ring-intercom-video-card]';
@@ -266,8 +267,8 @@ class RingIntercomVideoCard extends HTMLElement {
         :host { display: block; }
         ha-card { padding: 0; overflow: hidden; }
         .container { display: flex; flex-direction: column; background: #000; }
-        .video-wrap { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000; }
-        video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+        .video-wrap { position: relative; width: 100%; aspect-ratio: 4 / 3; max-height: var(--ring-video-max-height, none); background: #000; }
+        video { width: 100%; height: 100%; object-fit: var(--ring-video-object-fit, contain); max-height: var(--ring-video-max-height, none); background: #000; }
         .overlay {
           position: absolute; top: 8px; left: 8px;
           padding: 4px 8px; background: rgba(0, 0, 0, 0.6);
@@ -311,6 +312,18 @@ class RingIntercomVideoCard extends HTMLElement {
         </div>
       </ha-card>
     `;
+
+    // Optional video height limit (e.g. for small screens like Echo Show 5).
+    // Only inject the CSS variables when the option is defined, so existing
+    // installs without `video_max_height` render exactly as before.
+    const maxHeight = this._config && this._config.video_max_height;
+    if (maxHeight) {
+      this.style.setProperty('--ring-video-max-height', maxHeight);
+      this.style.setProperty('--ring-video-object-fit', 'contain');
+    } else {
+      this.style.removeProperty('--ring-video-max-height');
+      this.style.removeProperty('--ring-video-object-fit');
+    }
 
     const startBtn = this.shadowRoot.getElementById('start');
     const pttBtn = this.shadowRoot.getElementById('ptt');
