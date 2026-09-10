@@ -12,7 +12,7 @@
  *     service: script.turn_on
  *     entity_id: script.xxx
  *     data: {...}
- *   language: es|en|ca                    # optional, overrides HA language auto-detection
+ *   language: es|en|ca|fr                 # optional, overrides HA language auto-detection
  *   video_max_height: 230px               # optional, caps video height (px, vh, %...)
  *
  * Legacy schema (auto-migrated):
@@ -132,6 +132,39 @@ const TRANSLATIONS = {
     editor_language_label: 'Idioma (opcional, sobreescriu el d\'HA)',
     editor_language_help: "Idioma dels textos del card. Si es deixa buit, s'usa l'idioma de Home Assistant.",
   },
+  fr: {
+    idle: 'Inactif',
+    connecting: 'Connexion en cours...',
+    requesting_mic: 'Demande du micro...',
+    sending_offer: 'Envoi de l\'offre à HA...',
+    session: 'Session HA :',
+    answer_received: 'Réponse reçue',
+    pc_state: 'État PC :',
+    ptt_button: 'APPUYER POUR PARLER',
+    pick_up: 'Décrocher',
+    open_door: 'Ouvrir la porte',
+    hang_up: 'Raccrocher',
+    door_opened: 'Porte ouverte',
+    hung_up: 'Raccroché',
+    disconnected: 'Déconnecté',
+    error_opening: 'Erreur lors de l\'ouverture :',
+    door_not_configured: 'Ouverture de porte non configurée',
+    error_service: 'service mal formé',
+    error_prefix: 'Erreur :',
+    error_ha: 'Erreur HA :',
+    error_answer: 'Erreur dans la réponse :',
+    editor_camera_label: 'Entité caméra (requis)',
+    editor_camera_help: 'Entité caméra du composant Ring Intercom Video.',
+    editor_lock_label: 'Entité serrure (optionnel)',
+    editor_lock_help: 'Si configurée, un bouton "Ouvrir la porte" apparaît et appelle lock.unlock sur cette entité.',
+    editor_advanced_toggle: 'Avancé : action personnalisée pour ouvrir la porte',
+    editor_advanced_help: 'Configure un appel de service pour le bouton "Ouvrir la porte". Laisser vide désactive le bouton.',
+    editor_service_label: 'Service (ex. lock.unlock, script.turn_on)',
+    editor_action_entity_label: 'Entité (optionnel)',
+    editor_action_entity_help: 'Si votre service nécessite un entity_id, indiquez-le ici.',
+    editor_language_label: 'Langue (optionnel, remplace celle de HA)',
+    editor_language_help: 'Langue des textes de la carte. Laisser vide pour utiliser la langue de Home Assistant.',
+  },
 };
 
 const LANGUAGE_NAMES = {
@@ -139,6 +172,7 @@ const LANGUAGE_NAMES = {
   es: 'Espanol',
   en: 'English',
   ca: 'Catala',
+  fr: 'Français',
 };
 
 function detectLanguage(hass, configLang) {
