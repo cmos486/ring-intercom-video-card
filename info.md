@@ -14,7 +14,7 @@ Custom Lovelace card with **two-way audio + video** for Ring Intercom Video.
 
 ## Requirements
 
-- HTTPS access to Home Assistant (browsers require it for microphone access)
+- HTTPS access to Home Assistant **for two-way audio** (browsers only grant microphone access in a secure context). Over plain HTTP the card still works, in listen-only mode
 - The [ring-intercom-video](https://github.com/cmos486/ring-intercom-video) custom integration installed and working
 
 See the README for full setup instructions, Browser Mod auto-popup integration, and YAML examples.

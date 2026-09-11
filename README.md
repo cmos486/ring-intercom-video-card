@@ -38,9 +38,10 @@ Install the backend integration first, verify it created a `camera.*` entity for
 
 ### 🌐 HTTPS access to Home Assistant
 
-Browsers require a **secure context** to access the microphone (`getUserMedia`). If you access HA over plain HTTP (`http://192.168.x.x:8123`), the microphone will not work and you'll get one-way audio at best.
+Browsers require a **secure context** to access the microphone (`getUserMedia`). If you access HA over plain HTTP (`http://192.168.x.x:8123`), the microphone is unavailable and the card falls back to **listen only**: you get video and the visitor's voice, the push-to-talk button stays disabled, and the card says `Listen only: microphone needs HTTPS`.
 
-You need any of:
+So the card works over plain HTTP — you just can't talk back. For two-way audio you need any of:
+
 - 🏠 Nabu Casa Home Assistant Cloud (HTTPS automatic)
 - 🔐 A reverse proxy with Let's Encrypt (nginx, Caddy, Traefik, Nginx Proxy Manager...)
 - 🔒 Native HA HTTPS with a valid certificate
@@ -394,13 +395,21 @@ This is the same WebRTC machinery the official HA Ring integration already uses 
 
 ## 🧯 Troubleshooting
 
-### ❓ "Requesting microphone..." hangs or fails
+### ❓ Card says "Listen only" and push-to-talk stays disabled
 
-The browser is rejecting the microphone request:
+The call is fine — the browser just won't hand over a microphone. The card tells you which case you're in:
 
-- 🔒 You're accessing HA over **plain HTTP**. Switch to HTTPS (Nabu Casa, Let's Encrypt, etc.)
-- 🚫 You denied permission previously. Click the lock/info icon in the address bar and reset site permissions
-- 🎙️ No microphone available on your device
+| Message | Cause | Fix |
+|---|---|---|
+| `Listen only: microphone needs HTTPS` | HA served over plain HTTP, so it isn't a secure context | Switch to HTTPS (Nabu Casa, Let's Encrypt, etc.) |
+| `Listen only: microphone permission denied` | You denied permission for this site | Click the lock/info icon in the address bar and reset site permissions |
+| `Listen only: microphone unavailable` | No microphone on the device, or it's held by another app | Check your OS audio input settings |
+
+### ❓ Card goes straight to "Disconnected" when I tap Pick up
+
+In **v1.2.0 and earlier** this meant "something failed and the reason was thrown away" — the card set the real error on the overlay and then immediately overwrote it during teardown. Since **v1.2.1** the message survives, so whatever the overlay now says *is* the cause. Update the card first, then read the overlay.
+
+For the full picture, open the browser console (F12) and look for lines prefixed with `[ring-intercom-video-card]`.
 
 ### 🎥 Video shows but no audio reaches the door
 

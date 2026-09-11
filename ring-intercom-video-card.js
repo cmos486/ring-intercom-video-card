@@ -1,5 +1,5 @@
 /**
- * Ring Intercom Video Card - v1.2.0
+ * Ring Intercom Video Card - v1.2.1
  *
  * Two-way audio + video Lovelace card for Ring Intercom Video.
  * Companion to the ring-intercom-video custom component.
@@ -24,7 +24,7 @@
  * License: Apache-2.0
  */
 
-const CARD_VERSION = '1.2.0';
+const CARD_VERSION = '1.2.1';
 const CARD_TAG = 'ring-intercom-video-card';
 const EDITOR_TAG = 'ring-intercom-video-card-editor';
 const LOG_PREFIX = '[ring-intercom-video-card]';
@@ -53,6 +53,9 @@ const TRANSLATIONS = {
     error_prefix: 'Error:',
     error_ha: 'Error de HA:',
     error_answer: 'Error en answer:',
+    mic_insecure: 'Solo escucha: el microfono necesita HTTPS',
+    mic_denied: 'Solo escucha: permiso de microfono denegado',
+    mic_unavailable: 'Solo escucha: microfono no disponible',
     // Editor labels
     editor_camera_label: 'Entidad camara (requerido)',
     editor_camera_help: 'Entidad camara del componente Ring Intercom Video.',
@@ -87,6 +90,9 @@ const TRANSLATIONS = {
     error_prefix: 'Error:',
     error_ha: 'HA error:',
     error_answer: 'Error in answer:',
+    mic_insecure: 'Listen only: microphone needs HTTPS',
+    mic_denied: 'Listen only: microphone permission denied',
+    mic_unavailable: 'Listen only: microphone unavailable',
     editor_camera_label: 'Camera entity (required)',
     editor_camera_help: 'Camera entity from the Ring Intercom Video component.',
     editor_lock_label: 'Lock entity (optional)',
@@ -120,6 +126,9 @@ const TRANSLATIONS = {
     error_prefix: 'Error:',
     error_ha: "Error d'HA:",
     error_answer: 'Error a la resposta:',
+    mic_insecure: 'Nomes escolta: el microfon necessita HTTPS',
+    mic_denied: 'Nomes escolta: permis de microfon denegat',
+    mic_unavailable: 'Nomes escolta: microfon no disponible',
     editor_camera_label: 'Entitat camera (requerit)',
     editor_camera_help: 'Entitat camera del component Ring Intercom Video.',
     editor_lock_label: 'Entitat pany (opcional)',
@@ -206,6 +215,7 @@ class RingIntercomVideoCard extends HTMLElement {
     this._connecting = false;
     this._pendingCandidates = [];
     this._lang = 'en';
+    this._micError = null;
   }
 
   static async getConfigElement() {
@@ -376,12 +386,44 @@ class RingIntercomVideoCard extends HTMLElement {
     }
   }
 
+  // Returns a microphone stream, or null when there is none to be had.
+  // Never throws: the caller continues listen-only, and _micError carries the
+  // reason so the overlay can explain the dead push-to-talk button.
+  async _acquireMic() {
+    const T = (key) => t(this._lang, key);
+    // No mediaDevices at all means an insecure context in practice: browsers
+    // only expose getUserMedia over HTTPS (or localhost). Reaching HA at
+    // http://192.168.x.x:8123 lands here.
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      this._micError = window.isSecureContext === false ? 'mic_insecure' : 'mic_unavailable';
+      console.warn(
+        LOG_PREFIX,
+        'getUserMedia unavailable, continuing listen-only. isSecureContext:',
+        window.isSecureContext
+      );
+      return null;
+    }
+    this._status(T('requesting_mic'));
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false,
+      });
+    } catch (err) {
+      const name = err && err.name;
+      this._micError = name === 'NotAllowedError' ? 'mic_denied' : 'mic_unavailable';
+      console.warn(LOG_PREFIX, 'Microphone unavailable, continuing listen-only:', err);
+      return null;
+    }
+  }
+
   async _connect() {
     const T = (key) => t(this._lang, key);
     if (this._connecting || this._connected) return;
     this._connecting = true;
     this._sessionId = null;
     this._pendingCandidates = [];
+    this._micError = null;
     this._status(T('connecting'));
     const startBtn = this.shadowRoot.getElementById('start');
     const hangupBtn = this.shadowRoot.getElementById('hangup');
@@ -390,15 +432,22 @@ class RingIntercomVideoCard extends HTMLElement {
     hangupBtn.disabled = false;
     if (resolveOpenDoorAction(this._config)) doorBtn.disabled = false;
     try {
-      this._status(T('requesting_mic'));
-      this._localStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: false,
-      });
-      this._localStream.getAudioTracks().forEach((t) => (t.enabled = false));
+      // A missing microphone is not a reason to abandon the call. Without it
+      // the intercom still carries video and the visitor's voice -- most of
+      // what the card is for. Only push-to-talk is lost.
+      this._localStream = await this._acquireMic();
+      if (this._localStream) {
+        this._localStream.getAudioTracks().forEach((t) => (t.enabled = false));
+      }
       this._pc = new RTCPeerConnection({ iceServers: [], bundlePolicy: 'max-bundle' });
-      const audioTrack = this._localStream.getAudioTracks()[0];
-      this._pc.addTransceiver(audioTrack, { direction: 'sendrecv', streams: [this._localStream] });
+      const audioTrack = this._localStream && this._localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        this._pc.addTransceiver(audioTrack, { direction: 'sendrecv', streams: [this._localStream] });
+      } else {
+        // Still offer an audio m-line. Ring mirrors what we offer, so dropping
+        // it would silence the incoming direction too.
+        this._pc.addTransceiver('audio', { direction: 'recvonly' });
+      }
       this._pc.addTransceiver('video', { direction: 'recvonly' });
       this._pc.ontrack = (ev) => {
         console.log(LOG_PREFIX, 'Track recibido:', ev.track.kind);
@@ -412,10 +461,18 @@ class RingIntercomVideoCard extends HTMLElement {
         if (this._pc.connectionState === 'connected') {
           this._connected = true;
           const pttBtn = this.shadowRoot.getElementById('ptt');
-          pttBtn.disabled = false;
-          pttBtn.classList.add('ready');
+          if (this._localStream) {
+            pttBtn.disabled = false;
+            pttBtn.classList.add('ready');
+          } else {
+            // Leave the button dead, but say why: a silent dead button reads
+            // as a broken card to someone who only wanted to talk back.
+            this._status(T(this._micError || 'mic_unavailable'));
+          }
         } else if (['failed', 'disconnected', 'closed'].includes(this._pc.connectionState)) {
-          this._teardown();
+          // 'failed' is a diagnosis worth reading; the teardown text would
+          // replace it with a generic "Disconnected".
+          this._teardown({ keepStatus: this._pc.connectionState === 'failed' });
         }
       };
       this._pc.onicecandidate = async (ev) => {
@@ -435,7 +492,7 @@ class RingIntercomVideoCard extends HTMLElement {
     } catch (err) {
       this._status(`${T('error_prefix')} ${err.message}`);
       console.error(LOG_PREFIX, 'Error:', err);
-      this._teardown();
+      this._teardown({ keepStatus: true });
     } finally {
       this._connecting = false;
     }
@@ -486,7 +543,10 @@ class RingIntercomVideoCard extends HTMLElement {
     console.log(LOG_PREFIX, 'Mic:', enabled ? 'ON' : 'OFF');
   }
 
-  _teardown() {
+  // keepStatus: the caller already put a message on the overlay explaining
+  // why the call is ending. Overwriting it with the generic text is what made
+  // a failing card report nothing but "Disconnected".
+  _teardown({ keepStatus = false } = {}) {
     const T = (key) => t(this._lang, key);
     const wasConnected = this._connected;
     this._connected = false;
@@ -508,7 +568,9 @@ class RingIntercomVideoCard extends HTMLElement {
     if (hangupBtn) hangupBtn.disabled = true;
     const doorBtn = this.shadowRoot.getElementById('door');
     if (doorBtn) doorBtn.disabled = true;
-    this._status(wasConnected ? T('hung_up') : T('disconnected'));
+    if (!keepStatus) {
+      this._status(wasConnected ? T('hung_up') : T('disconnected'));
+    }
   }
 
   disconnectedCallback() {
