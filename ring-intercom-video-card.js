@@ -1,5 +1,5 @@
 /**
- * Ring Intercom Video Card - v1.3.0
+ * Ring Intercom Video Card - v1.3.1
  *
  * Two-way audio + video Lovelace card for Ring Intercom Video.
  * Companion to the ring-intercom-video custom component.
@@ -29,7 +29,7 @@
  * License: Apache-2.0
  */
 
-const CARD_VERSION = '1.3.0';
+const CARD_VERSION = '1.3.1';
 const CARD_TAG = 'ring-intercom-video-card';
 const EDITOR_TAG = 'ring-intercom-video-card-editor';
 const LOG_PREFIX = '[ring-intercom-video-card]';
@@ -328,8 +328,9 @@ class RingIntercomVideoCard extends HTMLElement {
           </div>`
       : `
           <div class="video-wrap">
-            <video id="video" autoplay playsinline></video>
+            <video id="video" autoplay playsinline muted></video>
             <div class="overlay" id="status">${T('idle')}</div>
+            <button class="unblock over-video" id="unblock" hidden>🔊 ${T('audio_unblock')}</button>
           </div>`;
 
     this.shadowRoot.innerHTML = `
@@ -356,6 +357,11 @@ class RingIntercomVideoCard extends HTMLElement {
           margin-top: 10px; padding: 10px 18px; font-size: 14px; font-weight: 600;
           border: none; border-radius: 8px; background: #f57c00; color: #fff;
           cursor: pointer; user-select: none;
+        }
+        /* Same tap target centred over the video surface. */
+        .unblock.over-video {
+          position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+          margin-top: 0;
         }
         /* An author display rule outranks the UA [hidden] rule, so hidden
            needs an explicit guard here. */
@@ -426,13 +432,17 @@ class RingIntercomVideoCard extends HTMLElement {
     pttBtn.addEventListener('touchend', pttUp);
     pttBtn.addEventListener('touchcancel', pttUp);
 
-    if (this._audioOnly) {
-      const unblockBtn = this.shadowRoot.getElementById('unblock');
-      if (unblockBtn) unblockBtn.addEventListener('click', () => this._retryAudioPlayback());
-      // Self-heal: if playback starts by any other route, the tap target is
-      // stale and must go away on its own.
-      const sink = this._remoteSink();
-      if (sink) sink.addEventListener('playing', () => this._hideAudioUnblock());
+    const unblockBtn = this.shadowRoot.getElementById('unblock');
+    if (unblockBtn) unblockBtn.addEventListener('click', () => this._retryAudioPlayback());
+    // Self-heal: if playback starts by any other route, the tap target is
+    // stale and must go away on its own. A muted video does not count: the
+    // button is there precisely because the picture is running without sound.
+    const sink = this._remoteSink();
+    if (sink) {
+      sink.addEventListener('playing', () => {
+        if (sink.muted) return;
+        this._hideAudioUnblock();
+      });
     }
 
     if (!resolveOpenDoorAction(this._config)) {
@@ -457,12 +467,57 @@ class RingIntercomVideoCard extends HTMLElement {
   async _retryAudioPlayback() {
     const sink = this._remoteSink();
     if (!sink) return;
+    // This runs from a real click, so the activation the autoplay policy was
+    // waiting for is present: unmuting is safe now.
+    sink.muted = false;
     try {
       await sink.play();
       this._hideAudioUnblock();
     } catch (err) {
       console.warn(LOG_PREFIX, 'retry play() failed:', err && err.name);
+      // Never trade a silent picture for no picture at all.
+      if (!this._audioOnly) {
+        sink.muted = true;
+        sink.play().catch(() => {});
+      }
     }
+  }
+
+  // The video element starts muted because muted playback is the one thing
+  // every autoplay policy allows unconditionally; audible playback needs a
+  // user activation, and the one from "Pick up" is usually long expired by
+  // the time getUserMedia, the SDP exchange and ICE have finished. That is
+  // exactly what the Android WebView behind the HA Companion app enforces
+  // (its `mediaPlaybackRequiresUserGesture` is on unless the user turns on
+  // Settings -> Companion app -> Autoplay videos), where an unmuted element
+  // simply never starts and the card shows the WebView's grey play button.
+  //
+  // So: get the picture up muted, then try to unmute. A browser that refuses
+  // pauses the element instead of rejecting, hence the 'pause' listener --
+  // fall back to a muted picture plus a tap target, which is the activation.
+  _unmuteRemoteVideo() {
+    const video = this.shadowRoot.getElementById('video');
+    if (!video || !video.muted) return;
+    const pcAtUnmute = this._pc;
+    const cleanup = () => {
+      video.removeEventListener('pause', onPause);
+      clearTimeout(timer);
+    };
+    const onPause = () => {
+      cleanup();
+      // Hang-up and teardown also pause; only react while this call is live.
+      if (!this._pc || this._pc !== pcAtUnmute) return;
+      console.warn(LOG_PREFIX, 'Audible playback blocked, staying muted');
+      video.muted = true;
+      video.play().catch(() => {});
+      this._showAudioUnblock();
+    };
+    const timer = setTimeout(cleanup, 1500);
+    video.addEventListener('pause', onPause);
+    video.muted = false;
+    video.play().catch((err) => {
+      console.warn(LOG_PREFIX, 'unmute play() failed:', err && err.name);
+    });
   }
 
   // Single point where the remote-media sink is chosen. Everything downstream
@@ -536,6 +591,9 @@ class RingIntercomVideoCard extends HTMLElement {
     this._connecting = true;
     this._refreshAudioOnly();
     this._hideAudioUnblock();
+    // Every call starts muted; _unmuteRemoteVideo() takes it from there.
+    const remoteVideo = this.shadowRoot.getElementById('video');
+    if (remoteVideo) remoteVideo.muted = true;
     this._sessionId = null;
     this._pendingCandidates = [];
     this._micError = null;
@@ -575,9 +633,9 @@ class RingIntercomVideoCard extends HTMLElement {
         if (!sink) return;
         if (!sink.srcObject) sink.srcObject = new MediaStream();
         sink.srcObject.addTrack(ev.track);
-        // Autoplay normally succeeds because _connect() runs from the "Pick up"
-        // click, so the tab still holds a user activation. This play() is the
-        // safety net for when it does not.
+        // The video element is muted at this point, so this play() is allowed
+        // everywhere; the audio-only surface relies on the activation from the
+        // "Pick up" click, and this catch is its safety net.
         const pcAtAttach = this._pc;
         sink.play().catch((err) => {
           // NotAllowedError is the autoplay-policy rejection: the user will
@@ -586,18 +644,28 @@ class RingIntercomVideoCard extends HTMLElement {
           // time, so a play() can be interrupted by the next addTrack.
           if (err && err.name === 'NotAllowedError') {
             console.warn(LOG_PREFIX, 'Autoplay blocked:', err);
-            // Audio-only gets a tap target to recover. The video path gets
-            // nothing but this log: there is no status text to overwrite from
-            // here, and blocked video is already visible as a dead surface.
-            // Skip if the call already moved on (hung up / failed): _teardown()
-            // nulls _pc, so an identity check covers both.
-            if (this._audioOnly && this._pc && this._pc === pcAtAttach) {
+            // Both surfaces get the tap target -- the tap is itself the
+            // activation the browser is waiting for. Skip if the call already
+            // moved on (hung up / failed): _teardown() nulls _pc, so an
+            // identity check covers both.
+            if (this._pc && this._pc === pcAtAttach) {
               this._showAudioUnblock();
             }
           } else {
             console.debug(LOG_PREFIX, 'play() rejected, ignored:', err && err.name);
           }
         });
+        // Sound rides on the audio track, so that is when the video surface
+        // tries to unmute. Wait until the element is really running: tracks
+        // attach one at a time and each attach interrupts the previous play(),
+        // so that promise is not a reliable "we are playing" signal.
+        if (!this._audioOnly && ev.track.kind === 'audio') {
+          const unmute = () => {
+            if (this._pc && this._pc === pcAtAttach) this._unmuteRemoteVideo();
+          };
+          if (sink.paused) sink.addEventListener('playing', unmute, { once: true });
+          else unmute();
+        }
       };
       this._pc.onconnectionstatechange = () => {
         if (!this._pc) return;
