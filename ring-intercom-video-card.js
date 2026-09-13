@@ -1,5 +1,5 @@
 /**
- * Ring Intercom Video Card - v1.2.1
+ * Ring Intercom Video Card - v1.2.2
  *
  * Two-way audio + video Lovelace card for Ring Intercom Video.
  * Companion to the ring-intercom-video custom component.
@@ -24,7 +24,7 @@
  * License: Apache-2.0
  */
 
-const CARD_VERSION = '1.2.1';
+const CARD_VERSION = '1.2.2';
 const CARD_TAG = 'ring-intercom-video-card';
 const EDITOR_TAG = 'ring-intercom-video-card-editor';
 const LOG_PREFIX = '[ring-intercom-video-card]';
@@ -56,6 +56,7 @@ const TRANSLATIONS = {
     mic_insecure: 'Solo escucha: el microfono necesita HTTPS',
     mic_denied: 'Solo escucha: permiso de microfono denegado',
     mic_unavailable: 'Solo escucha: microfono no disponible',
+    audio_unblock: 'Pulsa para activar el audio',
     // Editor labels
     editor_camera_label: 'Entidad camara (requerido)',
     editor_camera_help: 'Entidad camara del componente Ring Intercom Video.',
@@ -93,6 +94,7 @@ const TRANSLATIONS = {
     mic_insecure: 'Listen only: microphone needs HTTPS',
     mic_denied: 'Listen only: microphone permission denied',
     mic_unavailable: 'Listen only: microphone unavailable',
+    audio_unblock: 'Tap to enable audio',
     editor_camera_label: 'Camera entity (required)',
     editor_camera_help: 'Camera entity from the Ring Intercom Video component.',
     editor_lock_label: 'Lock entity (optional)',
@@ -129,6 +131,7 @@ const TRANSLATIONS = {
     mic_insecure: 'Nomes escolta: el microfon necessita HTTPS',
     mic_denied: 'Nomes escolta: permis de microfon denegat',
     mic_unavailable: 'Nomes escolta: microfon no disponible',
+    audio_unblock: "Prem per activar l'audio",
     editor_camera_label: 'Entitat camera (requerit)',
     editor_camera_help: 'Entitat camera del component Ring Intercom Video.',
     editor_lock_label: 'Entitat pany (opcional)',
@@ -284,6 +287,15 @@ class RingIntercomVideoCard extends HTMLElement {
           padding: 4px 8px; background: rgba(0, 0, 0, 0.6);
           color: #fff; font-size: 12px; border-radius: 4px; font-family: monospace;
         }
+        .unblock {
+          position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+          padding: 10px 18px; font-size: 14px; font-weight: 600;
+          border: none; border-radius: 8px; background: #f57c00; color: #fff;
+          cursor: pointer; user-select: none;
+        }
+        /* An author display rule outranks the UA [hidden] rule, so hidden
+           needs an explicit guard here. */
+        .unblock[hidden] { display: none; }
         .controls { display: flex; flex-direction: column; padding: 16px; gap: 12px; background: #1a1a1a; }
         .row { display: flex; gap: 12px; }
         .ptt {
@@ -308,8 +320,9 @@ class RingIntercomVideoCard extends HTMLElement {
       <ha-card>
         <div class="container">
           <div class="video-wrap">
-            <video id="video" autoplay playsinline></video>
+            <video id="video" autoplay playsinline muted></video>
             <div class="overlay" id="status">${T('idle')}</div>
+            <button class="unblock" id="unblock" hidden>🔊 ${T('audio_unblock')}</button>
           </div>
           <div class="controls">
             <button class="ptt" id="ptt" disabled>${T('ptt_button')}</button>
@@ -344,6 +357,19 @@ class RingIntercomVideoCard extends HTMLElement {
     hangupBtn.addEventListener('click', () => this._teardown());
     doorBtn.addEventListener('click', () => this._openDoor());
 
+    const unblockBtn = this.shadowRoot.getElementById('unblock');
+    if (unblockBtn) unblockBtn.addEventListener('click', () => this._retryAudiblePlayback());
+    // Self-heal: if audible playback starts by any other route, the tap target
+    // is stale and must go away on its own. Muted playback does not count --
+    // the button is there precisely because the picture runs without sound.
+    const video = this.shadowRoot.getElementById('video');
+    if (video) {
+      video.addEventListener('playing', () => {
+        if (video.muted) return;
+        this._hideAudioUnblock();
+      });
+    }
+
     const pttDown = (e) => { e.preventDefault(); this._setMicEnabled(true); pttBtn.classList.add('active'); };
     const pttUp = (e) => { e.preventDefault(); this._setMicEnabled(false); pttBtn.classList.remove('active'); };
     pttBtn.addEventListener('mousedown', pttDown);
@@ -356,6 +382,74 @@ class RingIntercomVideoCard extends HTMLElement {
     if (!resolveOpenDoorAction(this._config)) {
       doorBtn.style.display = 'none';
     }
+  }
+
+  // Autoplay recovery. A browser that refuses audible playback wants a user
+  // activation, so the fix is an element to tap -- the tap itself is the
+  // missing activation. Kept off the status overlay: connection state and
+  // playback state are orthogonal and must not compete for one textContent.
+  _showAudioUnblock() {
+    const btn = this.shadowRoot.getElementById('unblock');
+    if (btn) btn.hidden = false;
+  }
+
+  _hideAudioUnblock() {
+    const btn = this.shadowRoot.getElementById('unblock');
+    if (btn) btn.hidden = true;
+  }
+
+  async _retryAudiblePlayback() {
+    const video = this.shadowRoot.getElementById('video');
+    if (!video) return;
+    // This runs from a real click, so the activation the autoplay policy was
+    // waiting for is present: unmuting is safe now.
+    video.muted = false;
+    try {
+      await video.play();
+      this._hideAudioUnblock();
+    } catch (err) {
+      console.warn(LOG_PREFIX, 'retry play() failed:', err && err.name);
+      // Never trade a silent picture for no picture at all.
+      video.muted = true;
+      video.play().catch(() => {});
+    }
+  }
+
+  // The video element starts muted because muted playback is the one thing
+  // every autoplay policy allows unconditionally; audible playback needs a
+  // user activation, and the one from "Pick up" is usually long expired by
+  // the time getUserMedia, the SDP exchange and ICE have finished. That is
+  // exactly what the Android WebView behind the HA Companion app enforces
+  // (its `mediaPlaybackRequiresUserGesture` is on unless the user turns on
+  // Settings -> Companion app -> Autoplay videos), where an unmuted element
+  // simply never starts and the card shows the WebView's grey play button.
+  //
+  // So: get the picture up muted, then try to unmute. A browser that refuses
+  // pauses the element instead of rejecting, hence the 'pause' listener --
+  // fall back to a muted picture plus a tap target, which is the activation.
+  _unmuteRemoteVideo() {
+    const video = this.shadowRoot.getElementById('video');
+    if (!video || !video.muted) return;
+    const pcAtUnmute = this._pc;
+    const cleanup = () => {
+      video.removeEventListener('pause', onPause);
+      clearTimeout(timer);
+    };
+    const onPause = () => {
+      cleanup();
+      // Hang-up and teardown also pause; only react while this call is live.
+      if (!this._pc || this._pc !== pcAtUnmute) return;
+      console.warn(LOG_PREFIX, 'Audible playback blocked, staying muted');
+      video.muted = true;
+      video.play().catch(() => {});
+      this._showAudioUnblock();
+    };
+    const timer = setTimeout(cleanup, 1500);
+    video.addEventListener('pause', onPause);
+    video.muted = false;
+    video.play().catch((err) => {
+      console.warn(LOG_PREFIX, 'unmute play() failed:', err && err.name);
+    });
   }
 
   _status(text) {
@@ -421,6 +515,10 @@ class RingIntercomVideoCard extends HTMLElement {
     const T = (key) => t(this._lang, key);
     if (this._connecting || this._connected) return;
     this._connecting = true;
+    this._hideAudioUnblock();
+    // Every call starts muted; _unmuteRemoteVideo() takes it from there.
+    const remoteVideo = this.shadowRoot.getElementById('video');
+    if (remoteVideo) remoteVideo.muted = true;
     this._sessionId = null;
     this._pendingCandidates = [];
     this._micError = null;
@@ -452,8 +550,35 @@ class RingIntercomVideoCard extends HTMLElement {
       this._pc.ontrack = (ev) => {
         console.log(LOG_PREFIX, 'Track recibido:', ev.track.kind);
         const video = this.shadowRoot.getElementById('video');
+        if (!video) return;
         if (!video.srcObject) video.srcObject = new MediaStream();
         video.srcObject.addTrack(ev.track);
+        // The element is muted here, so this is allowed everywhere; it only
+        // backs up the autoplay attribute, which does not always fire for a
+        // srcObject attached this late.
+        const pcAtAttach = this._pc;
+        video.play().catch((err) => {
+          // AbortError and friends are routine: tracks attach one at a time,
+          // so a play() can be interrupted by the next addTrack.
+          if (err && err.name === 'NotAllowedError') {
+            console.warn(LOG_PREFIX, 'Autoplay blocked:', err);
+            // Skip if the call already moved on (hung up / failed):
+            // _teardown() nulls _pc, so an identity check covers both.
+            if (this._pc && this._pc === pcAtAttach) this._showAudioUnblock();
+          } else {
+            console.debug(LOG_PREFIX, 'play() rejected, ignored:', err && err.name);
+          }
+        });
+        // Sound rides on the audio track, so that is when we try to unmute.
+        // Wait until the element is really running: each attach interrupts the
+        // previous play(), so that promise is not a reliable signal.
+        if (ev.track.kind === 'audio') {
+          const unmute = () => {
+            if (this._pc && this._pc === pcAtAttach) this._unmuteRemoteVideo();
+          };
+          if (video.paused) video.addEventListener('playing', unmute, { once: true });
+          else unmute();
+        }
       };
       this._pc.onconnectionstatechange = () => {
         if (!this._pc) return;
@@ -560,6 +685,7 @@ class RingIntercomVideoCard extends HTMLElement {
     if (this._localStream) { this._localStream.getTracks().forEach((t) => t.stop()); this._localStream = null; }
     this._sessionId = null;
     this._pendingCandidates = [];
+    this._hideAudioUnblock();
     const pttBtn = this.shadowRoot.getElementById('ptt');
     if (pttBtn) { pttBtn.disabled = true; pttBtn.classList.remove('ready', 'active'); }
     const startBtn = this.shadowRoot.getElementById('start');
