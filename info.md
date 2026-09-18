@@ -6,7 +6,7 @@ Custom Lovelace card with **two-way audio + video** for Ring Intercom Video.
 
 - 📹 Live video stream via native WebRTC
 - 🎤 Two-way audio with push-to-talk
-- 🔓 Open door button (uses native `lock.unlock` or any custom service)
+- 🔓 Open door button (Ring's `button.*` opener, a `lock.*`, or any custom service)
 - 📵 Hang up button
 - 🛠 Visual editor with entity pickers
 - 🌍 Multi-language UI (Spanish, English, Catalan) with auto-detection

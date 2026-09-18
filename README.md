@@ -14,7 +14,7 @@ This is the **frontend card**. It needs the companion backend custom integration
 
 - 📹 **Live video** stream from the intercom (native WebRTC, no transcoding)
 - 🎤 **Two-way audio** with push-to-talk button
-- 🔓 **Open door** button (uses Ring's native `lock.unlock` or any custom service)
+- 🔓 **Open door** button (the Ring integration's `button.*` opener, a `lock.*`, or any custom service)
 - 📵 **Hang up** button (clean session teardown, releases mic and camera)
 - 🛠 **Visual editor** with entity pickers — no YAML needed
 - 🌍 **Multi-language UI** with auto-detection: Spanish, English, Catalan
@@ -135,9 +135,9 @@ If you prefer not to use HACS:
 4. Search for **Ring Intercom Video Card** in the picker
 5. The **visual editor** will open:
    - 📹 **Camera entity**: pick the `camera.*` created by the backend integration
-   - 🔓 **Lock entity** (optional): pick the `lock.*` provided by the Ring integration to enable the "Open door" button
+   - 🔓 **Open door entity** (optional): pick the entity that opens the door and the "Open door" button appears. With the **official Ring integration** that is the `button.*` **Open door** entity; with **ring-mqtt** it is the `lock.*`. A `script.*`, `switch.*`, `input_button.*`, `scene.*` or `cover.*` works too — the card calls the right service for that domain.
    - 🌍 **Language** (optional): override the auto-detected language (defaults to your HA language)
-   - ⚙️ **Advanced** (toggle): instead of a simple lock, you can call any service when "Open door" is pressed
+   - ⚙️ **Advanced** (toggle): instead of a single entity, you can call any service when "Open door" is pressed
 6. Click **Save**
 
 ---
@@ -149,20 +149,48 @@ The visual editor covers the typical cases, but here's the full schema for refer
 | Option | Type | Required | Description |
 |---|---|---|---|
 | `entity` | string | ✅ Yes | Camera entity from the backend integration (`camera.*`) |
-| `lock_entity` | string | ❌ No | Lock entity used for the "Open door" button. Calls `lock.unlock`. |
-| `open_door_action` | object | ❌ No | Advanced: custom service call for "Open door". Overrides `lock_entity` if set. |
-| `open_door_action.service` | string | — | Service to call (e.g. `script.turn_on`, `automation.trigger`) |
+| `open_door_entity` | string | ❌ No | Entity that opens the door. The service is derived from its domain (see table below). |
+| `lock_entity` | string | ❌ No | **Deprecated**, kept working: old name for `open_door_entity`. |
+| `open_door_action` | object | ❌ No | Advanced: custom service call for "Open door". Overrides `open_door_entity` if set. |
+| `open_door_action.service` | string | — | Service to call (e.g. `script.turn_on`, `automation.trigger`). Optional: if omitted, it is derived from `entity_id`. |
 | `open_door_action.entity_id` | string | — | Entity passed as `entity_id` to the service |
 | `open_door_action.data` | object | — | Additional service data |
 | `language` | string | ❌ No | Force UI language: `es`, `en`, `ca`. If omitted, follows Home Assistant's language. |
 | `video_max_height` | string | ❌ No | Caps the video height with any CSS length (`px`, `vh`, `%`...). When set, the video uses `object-fit: contain` so it never deforms. If omitted, the video keeps its default size (no limit) — existing configs are unaffected. |
 
-### 📝 Example — Simple (just lock)
+### 🔓 Which service each entity gets
+
+`open_door_entity` (and an `open_door_action` with no `service`) is resolved by domain:
+
+| Entity domain | Service called | Typical source |
+|---|---|---|
+| `button.*` | `button.press` | **Official Ring integration** — `button.<device>_open_door` |
+| `lock.*` | `lock.unlock` | **ring-mqtt** |
+| `switch.*` | `switch.turn_on` | A relay / dry contact |
+| `input_button.*` | `input_button.press` | Helper driving your own automation |
+| `input_boolean.*` | `input_boolean.turn_on` | Helper driving your own automation |
+| `script.*` | `script.turn_on` | Your own open-door sequence |
+| `scene.*` | `scene.turn_on` | Your own open-door sequence |
+| `cover.*` | `cover.open_cover` | A gate |
+
+Anything else needs the **Advanced** mode with an explicit `service`.
+
+### 📝 Example — Simple, official Ring integration
+
+The Ring integration has no `lock` entity for intercoms: its opener is a **button**.
 
 ```yaml
 type: custom:ring-intercom-video-card
 entity: camera.entrada_principal_video_camera
-lock_entity: lock.entrada_principal_video_lock
+open_door_entity: button.entrada_principal_open_door
+```
+
+### 📝 Example — Simple, ring-mqtt
+
+```yaml
+type: custom:ring-intercom-video-card
+entity: camera.entrada_principal_video_camera
+open_door_entity: lock.entrada_principal_video_lock
 ```
 
 ### 📝 Example — Advanced (custom service)
@@ -180,7 +208,7 @@ open_door_action:
 ```yaml
 type: custom:ring-intercom-video-card
 entity: camera.entrada_principal_video_camera
-lock_entity: lock.entrada_principal_video_lock
+open_door_entity: button.entrada_principal_open_door
 language: ca
 ```
 
@@ -191,7 +219,7 @@ On small displays such as an **Echo Show 5** (480 px tall), the default `4:3` vi
 ```yaml
 type: custom:ring-intercom-video-card
 entity: camera.entrada_principal_video_camera
-lock_entity: lock.entrada_principal_video_lock
+open_door_entity: button.entrada_principal_open_door
 video_max_height: 230px   # or 50vh, etc.
 ```
 
@@ -205,7 +233,7 @@ data:
   content:
     type: custom:ring-intercom-video-card
     entity: camera.entrada_principal_video_camera
-    lock_entity: lock.entrada_principal_video_lock
+    open_door_entity: button.entrada_principal_open_door
     video_max_height: 230px
 ```
 
@@ -213,7 +241,7 @@ data:
 
 ### 📝 Example — No door button
 
-If neither `lock_entity` nor `open_door_action` is configured, the **Open door** button is automatically hidden. Useful if you only want video + audio.
+If neither `open_door_entity` nor `open_door_action` is configured, the **Open door** button is automatically hidden. Useful if you only want video + audio.
 
 ```yaml
 type: custom:ring-intercom-video-card
@@ -312,7 +340,7 @@ action:
       content:
         type: custom:ring-intercom-video-card
         entity: camera.entrada_principal_video_camera
-        lock_entity: lock.entrada_principal_video_lock
+        open_door_entity: button.entrada_principal_open_door
       dismissable: true
       autoclose: false
       timeout: 60000
@@ -475,7 +503,7 @@ You're caching an old copy:
 
 ### 🛎️ "Open door" doesn't actually unlock
 
-- If using `lock_entity`: make sure `lock.unlock` works manually on that entity (Developer Tools → Services)
+- If using `open_door_entity`: make sure the service for its domain (`button.press`, `lock.unlock`…) works manually on that entity (Developer Tools → Actions)
 - If using `open_door_action`: check the service exists and works standalone
 - Look at HA logs around the time you pressed the button
 

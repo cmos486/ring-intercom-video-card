@@ -1,5 +1,5 @@
 /**
- * Ring Intercom Video Card - v1.3.1
+ * Ring Intercom Video Card - v1.3.2
  *
  * Two-way audio + video Lovelace card for Ring Intercom Video.
  * Companion to the ring-intercom-video custom component.
@@ -12,15 +12,16 @@
  * Schema:
  *   type: custom:ring-intercom-video-card
  *   entity: camera.xxx                    # required
- *   lock_entity: lock.xxx                 # optional, simple "open door" mode
+ *   open_door_entity: button.xxx          # optional, simple "open door" mode
  *   open_door_action:                     # optional, advanced mode
- *     service: script.turn_on
+ *     service: script.turn_on             # optional, inferred from entity_id
  *     entity_id: script.xxx
  *     data: {...}
  *   language: es|en|ca                    # optional, overrides HA language auto-detection
  *   video_max_height: 230px               # optional, caps video height (px, vh, %...)
  *
  * Legacy schema (auto-migrated):
+ *   lock_entity: lock.xxx
  *   open_door:
  *     service: ...
  *     entity_id: ...
@@ -29,7 +30,7 @@
  * License: Apache-2.0
  */
 
-const CARD_VERSION = '1.3.1';
+const CARD_VERSION = '1.3.2';
 const CARD_TAG = 'ring-intercom-video-card';
 const EDITOR_TAG = 'ring-intercom-video-card-editor';
 const LOG_PREFIX = '[ring-intercom-video-card]';
@@ -67,13 +68,13 @@ const TRANSLATIONS = {
     // Editor labels
     editor_camera_label: 'Entidad camara (requerido)',
     editor_camera_help: 'Entidad camara del componente Ring Intercom Video.',
-    editor_lock_label: 'Entidad cerradura (opcional)',
-    editor_lock_help: 'Si se configura, aparece el boton "Abrir puerta" y llama a lock.unlock en esta entidad.',
+    editor_door_label: 'Entidad para abrir la puerta (opcional)',
+    editor_door_help: 'Con la integracion Ring oficial es el boton "Abrir puerta" (button.*); con ring-mqtt, la cerradura (lock.*). Tambien vale un script o un switch: la tarjeta llama al servicio que toque.',
     editor_advanced_toggle: 'Avanzado: accion personalizada para abrir puerta',
-    editor_advanced_help: 'Configura cualquier llamada de servicio para el boton "Abrir puerta". Dejarlo vacio deshabilita el boton.',
-    editor_service_label: 'Servicio (ej. lock.unlock, script.turn_on)',
+    editor_advanced_help: 'Configura cualquier llamada de servicio para el boton "Abrir puerta". Si dejas el servicio vacio, se deduce del dominio de la entidad.',
+    editor_service_label: 'Servicio (opcional, ej. button.press, lock.unlock)',
     editor_action_entity_label: 'Entidad (opcional)',
-    editor_action_entity_help: 'Si el servicio necesita un entity_id, ponlo aqui.',
+    editor_action_entity_help: 'Entidad a la que se llama. Si el servicio esta vacio, se deduce de aqui.',
     editor_language_label: 'Idioma (opcional, sobrescribe el de HA)',
     editor_language_help: 'Idioma de los textos del card. Si se deja vacio, se usa el idioma de Home Assistant.',
   },
@@ -106,13 +107,13 @@ const TRANSLATIONS = {
     audio_only_hint: 'This device has no camera',
     editor_camera_label: 'Camera entity (required)',
     editor_camera_help: 'Camera entity from the Ring Intercom Video component.',
-    editor_lock_label: 'Lock entity (optional)',
-    editor_lock_help: 'If set, an "Open door" button appears and calls lock.unlock on this entity.',
+    editor_door_label: 'Open door entity (optional)',
+    editor_door_help: 'With the official Ring integration this is the "Open door" button (button.*); with ring-mqtt it is the lock (lock.*). A script or a switch works too: the card calls the right service for it.',
     editor_advanced_toggle: 'Advanced: custom open-door action',
-    editor_advanced_help: 'Configure any service call for the "Open door" button. Leaving it empty disables the button.',
-    editor_service_label: 'Service (e.g. lock.unlock, script.turn_on)',
+    editor_advanced_help: 'Configure any service call for the "Open door" button. Leave the service empty and it is inferred from the entity domain.',
+    editor_service_label: 'Service (optional, e.g. button.press, lock.unlock)',
     editor_action_entity_label: 'Entity (optional)',
-    editor_action_entity_help: 'If your service needs an entity_id, set it here.',
+    editor_action_entity_help: 'Entity the service is called on. With an empty service, it is inferred from this.',
     editor_language_label: 'Language (optional, overrides HA language)',
     editor_language_help: 'Language for card texts. Leave empty to use Home Assistant language.',
   },
@@ -145,13 +146,13 @@ const TRANSLATIONS = {
     audio_only_hint: 'Aquest dispositiu no te camera',
     editor_camera_label: 'Entitat camera (requerit)',
     editor_camera_help: 'Entitat camera del component Ring Intercom Video.',
-    editor_lock_label: 'Entitat pany (opcional)',
-    editor_lock_help: 'Si es configura, apareix el boto "Obrir porta" i crida lock.unlock en aquesta entitat.',
+    editor_door_label: 'Entitat per obrir la porta (opcional)',
+    editor_door_help: 'Amb la integracio Ring oficial es el boto "Obrir porta" (button.*); amb ring-mqtt, el pany (lock.*). Tambe val un script o un switch: la targeta crida el servei que toca.',
     editor_advanced_toggle: 'Avancat: accio personalitzada per obrir la porta',
-    editor_advanced_help: 'Configura qualsevol crida de servei per al boto "Obrir porta". Deixar-ho buit desactiva el boto.',
-    editor_service_label: 'Servei (p.ex. lock.unlock, script.turn_on)',
+    editor_advanced_help: 'Configura qualsevol crida de servei per al boto "Obrir porta". Si deixes el servei buit, es dedueix del domini de l\'entitat.',
+    editor_service_label: 'Servei (opcional, p.ex. button.press, lock.unlock)',
     editor_action_entity_label: 'Entitat (opcional)',
-    editor_action_entity_help: 'Si el servei necessita un entity_id, posa-l\'hi aqui.',
+    editor_action_entity_help: 'Entitat a la qual es crida. Si el servei esta buit, es dedueix d\'aqui.',
     editor_language_label: 'Idioma (opcional, sobreescriu el d\'HA)',
     editor_language_help: "Idioma dels textos del card. Si es deixa buit, s'usa l'idioma de Home Assistant.",
   },
@@ -181,12 +182,44 @@ function t(lang, key) {
 
 // ---------- Helpers ----------
 
+// Which service opens the door, per entity domain. Home Assistant's own Ring
+// integration has no lock platform at all: the intercom's opener is
+// `button.<name>_open_door`, pressed with button.press. ring-mqtt publishes a
+// lock.* instead, and plenty of people put a script or a relay switch in
+// between. All of them are one call away, so the card picks the call itself
+// rather than making the user know it.
+const DOOR_SERVICE_BY_DOMAIN = {
+  button: 'button.press',
+  input_button: 'input_button.press',
+  lock: 'lock.unlock',
+  switch: 'switch.turn_on',
+  input_boolean: 'input_boolean.turn_on',
+  script: 'script.turn_on',
+  scene: 'scene.turn_on',
+  cover: 'cover.open_cover',
+};
+
+const DOOR_ENTITY_DOMAINS = Object.keys(DOOR_SERVICE_BY_DOMAIN);
+
+function openDoorServiceFor(entityId) {
+  if (typeof entityId !== 'string') return null;
+  return DOOR_SERVICE_BY_DOMAIN[entityId.split('.')[0]] || null;
+}
+
 function migrateConfig(config) {
-  if (config && config.open_door && !config.open_door_action) {
-    const { open_door, ...rest } = config;
-    return { ...rest, open_door_action: open_door };
+  if (!config) return config;
+  let out = config;
+  if (out.open_door && !out.open_door_action) {
+    const { open_door, ...rest } = out;
+    out = { ...rest, open_door_action: open_door };
   }
-  return config;
+  // v1.2.2 and earlier only ever stored a lock.* here; the key outlived the
+  // assumption that the opener is a lock.
+  if (out.lock_entity && !out.open_door_entity) {
+    const { lock_entity, ...rest } = out;
+    out = { ...rest, open_door_entity: lock_entity };
+  }
+  return out;
 }
 
 // The backend marks Ring's handset-only intercom (device_kind:
@@ -197,11 +230,17 @@ function isAudioOnlyEntity(hass, entityId) {
 }
 
 function resolveOpenDoorAction(config) {
-  if (config.open_door_action && config.open_door_action.service) {
-    return config.open_door_action;
+  const action = config.open_door_action;
+  if (action && (action.service || action.entity_id)) {
+    // An entity alone is enough: leaving the service field empty used to
+    // silently hide the button, which read as "the card ignored my entity".
+    const service = action.service || openDoorServiceFor(action.entity_id);
+    if (service) return { ...action, service };
   }
-  if (config.lock_entity) {
-    return { service: 'lock.unlock', entity_id: config.lock_entity };
+  const entity = config.open_door_entity || config.lock_entity;
+  if (entity) {
+    const service = openDoorServiceFor(entity);
+    if (service) return { service, entity_id: entity };
   }
   return null;
 }
@@ -260,9 +299,21 @@ class RingIntercomVideoCard extends HTMLElement {
       );
       if (cam) cameraEntity = cam;
     }
-    return {
-      entity: cameraEntity || 'camera.your_ring_intercom',
-    };
+
+    // The Ring integration names its opener button.<device>_open_door. When
+    // there is exactly one, it is the door this card is about, so offer it
+    // rather than making the first configuration a scavenger hunt.
+    let doorEntity = '';
+    if (hass && hass.states) {
+      const doors = Object.keys(hass.states).filter(
+        (id) => id.startsWith('button.') && id.endsWith('_open_door')
+      );
+      if (doors.length === 1) doorEntity = doors[0];
+    }
+
+    const stub = { entity: cameraEntity || 'camera.your_ring_intercom' };
+    if (doorEntity) stub.open_door_entity = doorEntity;
+    return stub;
   }
 
   setConfig(config) {
@@ -877,10 +928,17 @@ class RingIntercomVideoCardEditor extends HTMLElement {
 
   _toggleAdvanced() {
     this._showAdvanced = !this._showAdvanced;
-    if (this._showAdvanced && this._config.lock_entity && !this._config.open_door_action) {
-      const lockEntity = this._config.lock_entity;
-      const { lock_entity: _, ...rest } = this._config;
-      this._config = { ...rest, open_door_action: { service: 'lock.unlock', entity_id: lockEntity } };
+    // Opening the advanced box carries the simple entity over as a full
+    // action, so the service it was already using is there to edit instead of
+    // having to be guessed again.
+    if (this._showAdvanced && this._config.open_door_entity && !this._config.open_door_action) {
+      const entityId = this._config.open_door_entity;
+      const service = openDoorServiceFor(entityId);
+      const { open_door_entity: _, ...rest } = this._config;
+      this._config = {
+        ...rest,
+        open_door_action: service ? { service, entity_id: entityId } : { entity_id: entityId },
+      };
       this._emitChange();
     }
     this._render();
@@ -893,12 +951,12 @@ class RingIntercomVideoCardEditor extends HTMLElement {
     return div;
   }
 
-  _makeEntityPicker({ value, label, domain, onChange }) {
+  _makeEntityPicker({ value, label, domains, onChange }) {
     const picker = document.createElement('ha-entity-picker');
     picker.hass = this._hass;
     picker.label = label;
     picker.value = value || '';
-    if (domain) picker.includeDomains = [domain];
+    if (domains && domains.length) picker.includeDomains = domains;
     picker.allowCustomEntity = true;
     picker.addEventListener('value-changed', (e) => { onChange(e.detail.value); });
     return picker;
@@ -949,22 +1007,22 @@ class RingIntercomVideoCardEditor extends HTMLElement {
     cameraField.appendChild(this._makeEntityPicker({
       value: c.entity,
       label: T('editor_camera_label'),
-      domain: 'camera',
+      domains: ['camera'],
       onChange: (v) => this._setConfigValue('entity', v),
     }));
     cameraField.appendChild(this._makeHelpText(T('editor_camera_help')));
     container.appendChild(cameraField);
 
     if (!adv) {
-      const lockField = document.createElement('div');
-      lockField.appendChild(this._makeEntityPicker({
-        value: c.lock_entity,
-        label: T('editor_lock_label'),
-        domain: 'lock',
-        onChange: (v) => this._setConfigValue('lock_entity', v),
+      const doorField = document.createElement('div');
+      doorField.appendChild(this._makeEntityPicker({
+        value: c.open_door_entity,
+        label: T('editor_door_label'),
+        domains: DOOR_ENTITY_DOMAINS,
+        onChange: (v) => this._setConfigValue('open_door_entity', v),
       }));
-      lockField.appendChild(this._makeHelpText(T('editor_lock_help')));
-      container.appendChild(lockField);
+      doorField.appendChild(this._makeHelpText(T('editor_door_help')));
+      container.appendChild(doorField);
     }
 
     // Language selector
@@ -1006,7 +1064,7 @@ class RingIntercomVideoCardEditor extends HTMLElement {
       entityWrap.appendChild(this._makeEntityPicker({
         value: action.entity_id,
         label: T('editor_action_entity_label'),
-        domain: null,
+        domains: null,
         onChange: (v) => this._setActionValue('entity_id', v),
       }));
       entityWrap.appendChild(this._makeHelpText(T('editor_action_entity_help')));
