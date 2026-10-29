@@ -4,12 +4,16 @@ Custom Lovelace card with **two-way audio + video** for Ring Intercom Video.
 
 ## Features
 
-- 📹 Live video stream via native WebRTC
-- 🎤 Two-way audio with push-to-talk
-- 🔓 Open door button (Ring's `button.*` opener, a `lock.*`, or any custom service)
-- 📵 Hang up button
-- 🛠 Visual editor with entity pickers
-- 🌍 Multi-language UI (Spanish, English, Catalan) with auto-detection
+- 👀 Muted video preview without picking up (on screen, or only when someone rings)
+- 📞 Pick up = instant two-way audio on the same WebRTC session
+- 🎤 Push-to-talk floating on the video (hold, or tap to talk / tap to mute)
+- 🛎️ Reacts to the doorbell: rings, highlights itself, starts the preview
+- 🔓 Open door bubble (Ring's `button.*` opener, a `lock.*`, or any custom service), optional hold-to-open
+- 🪟 Optional full-screen pop-up when picking up
+- 🔁 Auto-reconnect, auto hang-up, deep link `?ring_intercom=answer` for phone notifications
+- 🎨 Bubble Card look, follows your HA theme
+- 🛠 Visual editor built on Home Assistant's native form
+- 🌍 Multi-language UI (Spanish, English, Catalan, French) with auto-detection
 - 🔌 Companion to the [ring-intercom-video](https://github.com/cmos486/ring-intercom-video) custom component
 
 ## Requirements
@@ -17,4 +21,4 @@ Custom Lovelace card with **two-way audio + video** for Ring Intercom Video.
 - HTTPS access to Home Assistant **for two-way audio** (browsers only grant microphone access in a secure context). Over plain HTTP the card still works, in listen-only mode
 - The [ring-intercom-video](https://github.com/cmos486/ring-intercom-video) custom integration installed and working
 
-See the README for full setup instructions, Browser Mod auto-popup integration, and YAML examples.
+See the README for full setup instructions, phone notifications, Browser Mod auto-popup integration, and YAML examples.
