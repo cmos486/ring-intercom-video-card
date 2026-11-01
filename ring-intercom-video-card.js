@@ -1,8 +1,13 @@
 /**
- * Ring Intercom Video Card - v1.2.3
+ * Ring Intercom Video Card - v1.3.2
  *
  * Two-way audio + video Lovelace card for Ring Intercom Video.
  * Companion to the ring-intercom-video custom component.
+ *
+ * Also supports Ring's audio-only intercom (device_kind:
+ * intercom_handset_audio), which has no camera at all. The backend flags it
+ * with an `audio_only: true` entity attribute; the card then offers audio
+ * alone and renders an audio-only surface. EXPERIMENTAL - see README.
  *
  * Schema:
  *   type: custom:ring-intercom-video-card
@@ -25,7 +30,7 @@
  * License: Apache-2.0
  */
 
-const CARD_VERSION = '1.2.3';
+const CARD_VERSION = '1.3.2';
 const CARD_TAG = 'ring-intercom-video-card';
 const EDITOR_TAG = 'ring-intercom-video-card-editor';
 const LOG_PREFIX = '[ring-intercom-video-card]';
@@ -58,6 +63,8 @@ const TRANSLATIONS = {
     mic_denied: 'Solo escucha: permiso de microfono denegado',
     mic_unavailable: 'Solo escucha: microfono no disponible',
     audio_unblock: 'Pulsa para activar el audio',
+    audio_only_title: 'Intercomunicador de audio',
+    audio_only_hint: 'Este dispositivo no tiene camara',
     // Editor labels
     editor_camera_label: 'Entidad camara (requerido)',
     editor_camera_help: 'Entidad camara del componente Ring Intercom Video.',
@@ -96,6 +103,8 @@ const TRANSLATIONS = {
     mic_denied: 'Listen only: microphone permission denied',
     mic_unavailable: 'Listen only: microphone unavailable',
     audio_unblock: 'Tap to enable audio',
+    audio_only_title: 'Audio intercom',
+    audio_only_hint: 'This device has no camera',
     editor_camera_label: 'Camera entity (required)',
     editor_camera_help: 'Camera entity from the Ring Intercom Video component.',
     editor_door_label: 'Open door entity (optional)',
@@ -133,6 +142,8 @@ const TRANSLATIONS = {
     mic_denied: 'Nomes escolta: permis de microfon denegat',
     mic_unavailable: 'Nomes escolta: microfon no disponible',
     audio_unblock: "Prem per activar l'audio",
+    audio_only_title: "Intercomunicador d'audio",
+    audio_only_hint: 'Aquest dispositiu no te camera',
     editor_camera_label: 'Entitat camera (requerit)',
     editor_camera_help: 'Entitat camera del component Ring Intercom Video.',
     editor_door_label: 'Entitat per obrir la porta (opcional)',
@@ -211,6 +222,13 @@ function migrateConfig(config) {
   return out;
 }
 
+// The backend marks Ring's handset-only intercom (device_kind:
+// intercom_handset_audio) with audio_only: true. Older backends don't publish
+// the attribute at all, so a missing value must mean "has video".
+function isAudioOnlyEntity(hass, entityId) {
+  return hass?.states?.[entityId]?.attributes?.audio_only === true;
+}
+
 function resolveOpenDoorAction(config) {
   const action = config.open_door_action;
   if (action && (action.service || action.entity_id)) {
@@ -257,6 +275,7 @@ class RingIntercomVideoCard extends HTMLElement {
     this._connecting = false;
     this._pendingCandidates = [];
     this._lang = 'en';
+    this._audioOnly = false;
     this._micError = null;
   }
 
@@ -274,7 +293,9 @@ class RingIntercomVideoCard extends HTMLElement {
           (id.includes('intercom') ||
             id.includes('entrada') ||
             (hass.states[id].attributes &&
-              hass.states[id].attributes.device_kind === 'intercom_handset_video'))
+              ['intercom_handset_video', 'intercom_handset_audio'].includes(
+                hass.states[id].attributes.device_kind
+              )))
       );
       if (cam) cameraEntity = cam;
     }
@@ -301,17 +322,33 @@ class RingIntercomVideoCard extends HTMLElement {
     }
     this._config = migrateConfig(config);
     this._refreshLang();
+    this._refreshAudioOnly();
     this._render();
   }
 
   set hass(hass) {
     const langBefore = this._lang;
+    const audioOnlyBefore = this._audioOnly;
     this._hass = hass;
     this._refreshLang();
+    this._refreshAudioOnly();
+    const rendered = !!this.shadowRoot.querySelector('.container');
+    const langChanged = langBefore !== this._lang;
+    // KNOWN ISSUE (pre-existing, deliberately not fixed here): _render() rebuilds
+    // the shadow DOM and drops any live srcObject, so a language change mid-call
+    // kills the stream. The audio_only flip is gated on !busy so it does not
+    // become a second trigger for that.
+    const busy = this._connecting || this._connected;
+    const audioOnlyChanged = audioOnlyBefore !== this._audioOnly && !busy;
     // Re-render if language changed and we already rendered once
-    if (langBefore !== this._lang && this.shadowRoot.querySelector('.container')) {
+    if (rendered && (langChanged || audioOnlyChanged)) {
       this._render();
     }
+  }
+
+  _refreshAudioOnly() {
+    if (!this._config) return;
+    this._audioOnly = isAudioOnlyEntity(this._hass, this._config.entity);
   }
 
   _refreshLang() {
@@ -326,6 +363,27 @@ class RingIntercomVideoCard extends HTMLElement {
   _render() {
     const T = (key) => t(this._lang, key);
 
+    // The audio-only device has no camera, so no video element, no poster and
+    // no black rectangle -- just a handset placeholder and the hidden <audio>
+    // that plays the inbound Opus. `id="status"` exists in both surfaces
+    // because _status() writes to it unconditionally.
+    const surface = this._audioOnly
+      ? `
+          <div class="audio-wrap">
+            <div class="handset" aria-hidden="true">☎️</div>
+            <div class="audio-title">${T('audio_only_title')}</div>
+            <div class="audio-hint">${T('audio_only_hint')}</div>
+            <button class="unblock" id="unblock" hidden>🔊 ${T('audio_unblock')}</button>
+            <div class="overlay" id="status">${T('idle')}</div>
+            <audio id="remote-audio" autoplay></audio>
+          </div>`
+      : `
+          <div class="video-wrap">
+            <video id="video" autoplay playsinline muted></video>
+            <div class="overlay" id="status">${T('idle')}</div>
+            <button class="unblock over-video" id="unblock" hidden>🔊 ${T('audio_unblock')}</button>
+          </div>`;
+
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
@@ -338,15 +396,28 @@ class RingIntercomVideoCard extends HTMLElement {
           padding: 4px 8px; background: rgba(0, 0, 0, 0.6);
           color: #fff; font-size: 12px; border-radius: 4px; font-family: monospace;
         }
+        .audio-wrap {
+          position: relative; width: 100%; box-sizing: border-box;
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          gap: 6px; padding: 36px 16px 28px; background: #000;
+        }
+        .handset { font-size: 52px; line-height: 1; }
+        .audio-title { color: #fff; font-size: 16px; font-weight: 600; text-align: center; }
+        .audio-hint { color: #9e9e9e; font-size: 13px; text-align: center; }
         .unblock {
-          position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-          padding: 10px 18px; font-size: 14px; font-weight: 600;
+          margin-top: 10px; padding: 10px 18px; font-size: 14px; font-weight: 600;
           border: none; border-radius: 8px; background: #f57c00; color: #fff;
           cursor: pointer; user-select: none;
+        }
+        /* Same tap target centred over the video surface. */
+        .unblock.over-video {
+          position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+          margin-top: 0;
         }
         /* An author display rule outranks the UA [hidden] rule, so hidden
            needs an explicit guard here. */
         .unblock[hidden] { display: none; }
+        audio { display: none; }
         .controls { display: flex; flex-direction: column; padding: 16px; gap: 12px; background: #1a1a1a; }
         .row { display: flex; gap: 12px; }
         .ptt {
@@ -369,12 +440,7 @@ class RingIntercomVideoCard extends HTMLElement {
         .hangup-btn { background: #c62828; }
       </style>
       <ha-card>
-        <div class="container">
-          <div class="video-wrap">
-            <video id="video" autoplay playsinline muted></video>
-            <div class="overlay" id="status">${T('idle')}</div>
-            <button class="unblock" id="unblock" hidden>🔊 ${T('audio_unblock')}</button>
-          </div>
+        <div class="container">${surface}
           <div class="controls">
             <button class="ptt" id="ptt" disabled>${T('ptt_button')}</button>
             <div class="row">
@@ -408,19 +474,6 @@ class RingIntercomVideoCard extends HTMLElement {
     hangupBtn.addEventListener('click', () => this._teardown());
     doorBtn.addEventListener('click', () => this._openDoor());
 
-    const unblockBtn = this.shadowRoot.getElementById('unblock');
-    if (unblockBtn) unblockBtn.addEventListener('click', () => this._retryAudiblePlayback());
-    // Self-heal: if audible playback starts by any other route, the tap target
-    // is stale and must go away on its own. Muted playback does not count --
-    // the button is there precisely because the picture runs without sound.
-    const video = this.shadowRoot.getElementById('video');
-    if (video) {
-      video.addEventListener('playing', () => {
-        if (video.muted) return;
-        this._hideAudioUnblock();
-      });
-    }
-
     const pttDown = (e) => { e.preventDefault(); this._setMicEnabled(true); pttBtn.classList.add('active'); };
     const pttUp = (e) => { e.preventDefault(); this._setMicEnabled(false); pttBtn.classList.remove('active'); };
     pttBtn.addEventListener('mousedown', pttDown);
@@ -430,15 +483,28 @@ class RingIntercomVideoCard extends HTMLElement {
     pttBtn.addEventListener('touchend', pttUp);
     pttBtn.addEventListener('touchcancel', pttUp);
 
+    const unblockBtn = this.shadowRoot.getElementById('unblock');
+    if (unblockBtn) unblockBtn.addEventListener('click', () => this._retryAudioPlayback());
+    // Self-heal: if playback starts by any other route, the tap target is
+    // stale and must go away on its own. A muted video does not count: the
+    // button is there precisely because the picture is running without sound.
+    const sink = this._remoteSink();
+    if (sink) {
+      sink.addEventListener('playing', () => {
+        if (sink.muted) return;
+        this._hideAudioUnblock();
+      });
+    }
+
     if (!resolveOpenDoorAction(this._config)) {
       doorBtn.style.display = 'none';
     }
   }
 
-  // Autoplay recovery. A browser that refuses audible playback wants a user
-  // activation, so the fix is an element to tap -- the tap itself is the
-  // missing activation. Kept off the status overlay: connection state and
-  // playback state are orthogonal and must not compete for one textContent.
+  // Autoplay recovery. NotAllowedError means "this needs a user activation",
+  // so the fix is an element to tap -- the tap itself is the missing
+  // activation. Kept off the status overlay: connection state and playback
+  // state are orthogonal and must not compete for one textContent.
   _showAudioUnblock() {
     const btn = this.shadowRoot.getElementById('unblock');
     if (btn) btn.hidden = false;
@@ -449,20 +515,22 @@ class RingIntercomVideoCard extends HTMLElement {
     if (btn) btn.hidden = true;
   }
 
-  async _retryAudiblePlayback() {
-    const video = this.shadowRoot.getElementById('video');
-    if (!video) return;
+  async _retryAudioPlayback() {
+    const sink = this._remoteSink();
+    if (!sink) return;
     // This runs from a real click, so the activation the autoplay policy was
     // waiting for is present: unmuting is safe now.
-    video.muted = false;
+    sink.muted = false;
     try {
-      await video.play();
+      await sink.play();
       this._hideAudioUnblock();
     } catch (err) {
       console.warn(LOG_PREFIX, 'retry play() failed:', err && err.name);
       // Never trade a silent picture for no picture at all.
-      video.muted = true;
-      video.play().catch(() => {});
+      if (!this._audioOnly) {
+        sink.muted = true;
+        sink.play().catch(() => {});
+      }
     }
   }
 
@@ -501,6 +569,12 @@ class RingIntercomVideoCard extends HTMLElement {
     video.play().catch((err) => {
       console.warn(LOG_PREFIX, 'unmute play() failed:', err && err.name);
     });
+  }
+
+  // Single point where the remote-media sink is chosen. Everything downstream
+  // (attachment, play() handling, teardown) is shared between both modes.
+  _remoteSink() {
+    return this.shadowRoot.getElementById(this._audioOnly ? 'remote-audio' : 'video');
   }
 
   _status(text) {
@@ -566,6 +640,7 @@ class RingIntercomVideoCard extends HTMLElement {
     const T = (key) => t(this._lang, key);
     if (this._connecting || this._connected) return;
     this._connecting = true;
+    this._refreshAudioOnly();
     this._hideAudioUnblock();
     // Every call starts muted; _unmuteRemoteVideo() takes it from there.
     const remoteVideo = this.shadowRoot.getElementById('video');
@@ -597,37 +672,49 @@ class RingIntercomVideoCard extends HTMLElement {
         // it would silence the incoming direction too.
         this._pc.addTransceiver('audio', { direction: 'recvonly' });
       }
-      this._pc.addTransceiver('video', { direction: 'recvonly' });
+      // Ring mirrors every offered m-line back in its answer, so a video
+      // transceiver offered to a handset-only intercom would be answered too.
+      // Offer audio alone when the entity reports audio_only.
+      if (!this._audioOnly) {
+        this._pc.addTransceiver('video', { direction: 'recvonly' });
+      }
       this._pc.ontrack = (ev) => {
         console.log(LOG_PREFIX, 'Track recibido:', ev.track.kind);
-        const video = this.shadowRoot.getElementById('video');
-        if (!video) return;
-        if (!video.srcObject) video.srcObject = new MediaStream();
-        video.srcObject.addTrack(ev.track);
-        // The element is muted here, so this is allowed everywhere; it only
-        // backs up the autoplay attribute, which does not always fire for a
-        // srcObject attached this late.
+        const sink = this._remoteSink();
+        if (!sink) return;
+        if (!sink.srcObject) sink.srcObject = new MediaStream();
+        sink.srcObject.addTrack(ev.track);
+        // The video element is muted at this point, so this play() is allowed
+        // everywhere; the audio-only surface relies on the activation from the
+        // "Pick up" click, and this catch is its safety net.
         const pcAtAttach = this._pc;
-        video.play().catch((err) => {
-          // AbortError and friends are routine: tracks attach one at a time,
-          // so a play() can be interrupted by the next addTrack.
+        sink.play().catch((err) => {
+          // NotAllowedError is the autoplay-policy rejection: the user will
+          // hear nothing and has to act, so it is the only one worth showing.
+          // AbortError and friends are routine here -- tracks attach one at a
+          // time, so a play() can be interrupted by the next addTrack.
           if (err && err.name === 'NotAllowedError') {
             console.warn(LOG_PREFIX, 'Autoplay blocked:', err);
-            // Skip if the call already moved on (hung up / failed):
-            // _teardown() nulls _pc, so an identity check covers both.
-            if (this._pc && this._pc === pcAtAttach) this._showAudioUnblock();
+            // Both surfaces get the tap target -- the tap is itself the
+            // activation the browser is waiting for. Skip if the call already
+            // moved on (hung up / failed): _teardown() nulls _pc, so an
+            // identity check covers both.
+            if (this._pc && this._pc === pcAtAttach) {
+              this._showAudioUnblock();
+            }
           } else {
             console.debug(LOG_PREFIX, 'play() rejected, ignored:', err && err.name);
           }
         });
-        // Sound rides on the audio track, so that is when we try to unmute.
-        // Wait until the element is really running: each attach interrupts the
-        // previous play(), so that promise is not a reliable signal.
-        if (ev.track.kind === 'audio') {
+        // Sound rides on the audio track, so that is when the video surface
+        // tries to unmute. Wait until the element is really running: tracks
+        // attach one at a time and each attach interrupts the previous play(),
+        // so that promise is not a reliable "we are playing" signal.
+        if (!this._audioOnly && ev.track.kind === 'audio') {
           const unmute = () => {
             if (this._pc && this._pc === pcAtAttach) this._unmuteRemoteVideo();
           };
-          if (video.paused) video.addEventListener('playing', unmute, { once: true });
+          if (sink.paused) sink.addEventListener('playing', unmute, { once: true });
           else unmute();
         }
       };
@@ -726,11 +813,17 @@ class RingIntercomVideoCard extends HTMLElement {
     const T = (key) => t(this._lang, key);
     const wasConnected = this._connected;
     this._connected = false;
-    const video = this.shadowRoot.getElementById('video');
-    if (video && video.srcObject) {
-      video.srcObject.getTracks().forEach((t) => t.stop());
-      video.srcObject = null;
-    }
+    // Only one of these ever holds a stream, but clearing both keeps teardown
+    // correct even if audio_only flipped between connect and hang-up.
+    [
+      this.shadowRoot.getElementById('video'),
+      this.shadowRoot.getElementById('remote-audio'),
+    ].forEach((el) => {
+      if (el && el.srcObject) {
+        el.srcObject.getTracks().forEach((t) => t.stop());
+        el.srcObject = null;
+      }
+    });
     if (this._unsubscribe) { try { this._unsubscribe(); } catch (_) {} this._unsubscribe = null; }
     if (this._pc) { try { this._pc.close(); } catch (_) {} this._pc = null; }
     if (this._localStream) { this._localStream.getTracks().forEach((t) => t.stop()); this._localStream = null; }
@@ -992,7 +1085,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: CARD_TAG,
   name: 'Ring Intercom Video Card',
-  description: 'Two-way audio + video card for Ring Intercom Video',
+  description: 'Two-way audio + video card for Ring Intercom Video (audio-only intercom supported, experimental)',
   preview: false,
   documentationURL: 'https://github.com/cmos486/ring-intercom-video-card',
 });

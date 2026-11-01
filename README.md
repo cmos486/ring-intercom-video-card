@@ -21,6 +21,25 @@ This is the **frontend card**. It needs the companion backend custom integration
 - 📐 **Optional `video_max_height`** to fit small screens like the Echo Show 5
 - 🔌 Pure browser-side WebRTC, no `go2rtc`, no extra add-ons, no transcoding server
 - 🌐 Works on desktop and mobile browsers (with HTTPS)
+- ☎️ **Audio-only intercom support** (experimental) — see below
+
+---
+
+## ☎️ Audio-only intercom (experimental)
+
+Ring also sells an intercom handset **without a camera** (`device_kind: intercom_handset_audio`). The card supports it, with these differences from the video model:
+
+- **Two-way audio only.** Push-to-talk, open door and hang up all work exactly as on the video model.
+- **No video and no snapshots, by design.** There is no camera in the hardware, so the card renders an audio-only surface instead of a video player, and never requests a still image, poster or thumbnail. The backend short-circuits those requests too, so it never opens a pointless Ring session.
+- **Nothing to configure.** The card reads the `audio_only` attribute from the camera entity and switches automatically. Config schema, visual editor and every other option are unchanged.
+
+### Requirements
+
+This needs the **`intercom-handset-audio` branch** of the [ring-intercom-video](https://github.com/cmos486/ring-intercom-video) backend — that's the version that creates the entity for the audio handset and exposes the `audio_only` attribute. On the current released backend the attribute is absent, which the card reads as "has video", so video intercoms keep working unchanged either way.
+
+### ⚠️ Experimental
+
+Audio-only support has **not yet been verified end-to-end against real audio-handset hardware**. Two-way audio over Ring's WebRTC live view is confirmed working on that device, and the card path is gated entirely behind the `audio_only` attribute so it cannot affect the video model — but treat this as untested and please report what you find. Video-model behaviour is unaffected whether or not you run the backend branch.
 
 ---
 
@@ -49,7 +68,7 @@ So the card works over plain HTTP — you just can't talk back. For two-way audi
 ### 📋 Other requirements
 
 - 🏡 Home Assistant **2024.4** or newer
-- 📦 A **Ring Intercom Handset Video** device (the 2024/2025 model with camera) paired in your Ring account
+- 📦 A **Ring Intercom Handset Video** device (the 2024/2025 model with camera) paired in your Ring account, or a **Ring Intercom Handset Audio** device (no camera — see [Audio-only intercom](#️-audio-only-intercom-experimental))
 - 🌍 A modern browser (Chrome, Firefox, Safari, Edge — all current versions)
 
 ---
@@ -92,7 +111,7 @@ If this step doesn't produce a camera entity, fix that first — the card will n
 To confirm it loaded, open the browser console (F12) — you should see a blue banner like:
 
 ```
- RING-INTERCOM-VIDEO-CARD  v1.2.2
+ RING-INTERCOM-VIDEO-CARD  v1.3.2
 ```
 
 ### 🔧 Manual installation (alternative)
@@ -411,6 +430,7 @@ Browser  <──signaling via HA──>  Ring Cloud  <──media P2P──>  Ri
 ```
 
 - The card builds an `RTCPeerConnection` with two transceivers: `audio: sendrecv` and `video: recvonly`
+- On an **audio-only** intercom (`audio_only: true`) it offers the `audio: sendrecv` transceiver **only**, and omits the video one entirely. Ring mirrors every offered m-line back in its answer, so offering video to a device that has none would be answered with a video m-line that never carries media. There is **no SDP munging** in either mode
 - It calls Home Assistant's standard `camera/webrtc/offer` WebSocket API
 - The backend integration ([ring-intercom-video](https://github.com/cmos486/ring-intercom-video)) forwards the SDP offer to Ring's signaling servers
 - ICE candidates are exchanged via `camera/webrtc/candidate`
@@ -446,6 +466,12 @@ Fixed in **v1.2.2**. The Home Assistant Android app is a WebView, and its `media
 Since v1.2.2 the video element **starts muted** — muted video autoplay is allowed even in the WebView — and the card unmutes it as soon as the audio track arrives. If the WebView refuses the unmute, you keep the picture and get a **"Tap to enable audio"** button; the tap is the gesture it was waiting for.
 
 You can also enable **Settings → Companion app → Autoplay videos** in the Android app, which turns that WebView restriction off globally (it affects Frigate and other WebRTC cards too — see [home-assistant/android#6578](https://github.com/home-assistant/android/issues/6578)).
+
+### ☎️ Audio-only card connects but nothing is audible
+
+If a **"Tap to enable audio"** button appears on the card, the browser refused to start playback under its autoplay policy. **Tap it** — the tap is itself the user activation the browser was waiting for, so playback should start immediately and the button disappears. This should be rare, since playback normally inherits the activation from the **Pick up** button; it's most likely on iOS Safari and on wallpanel/kiosk setups.
+
+If no such button appears and the connection reaches `PC state: connected`, the audio path negotiated fine and the problem is upstream — check the backend logs, and make sure the tab isn't muted at the OS or browser-tab level. Note this device class is **experimental** and not yet verified against real hardware.
 
 ### 🎥 Video shows but no audio reaches the door
 
