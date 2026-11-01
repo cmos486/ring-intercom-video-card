@@ -111,7 +111,7 @@ If this step doesn't produce a camera entity, fix that first — the card will n
 To confirm it loaded, open the browser console (F12) — you should see a blue banner like:
 
 ```
- RING-INTERCOM-VIDEO-CARD  v1.3.1
+ RING-INTERCOM-VIDEO-CARD  v1.3.2
 ```
 
 ### 🔧 Manual installation (alternative)
@@ -461,9 +461,9 @@ For the full picture, open the browser console (F12) and look for lines prefixed
 
 ### 📱 Android Companion app: `PC state: connected` but only a grey play button
 
-Fixed in **v1.3.1**. The Home Assistant Android app is a WebView, and its `mediaPlaybackRequiresUserGesture` setting is on by default: it refuses to start **audible** media unless a user gesture is still in flight. By the time the microphone, the SDP exchange and ICE have finished, the tap on **Pick up** has long expired, so playback never started and the WebView drew its own grey play button over the dead video element. Desktop and mobile browsers don't hit this because they also allow playback on sites the user has already interacted with.
+Fixed in **v1.2.2**. The Home Assistant Android app is a WebView, and its `mediaPlaybackRequiresUserGesture` setting is on by default: it refuses to start **audible** media unless a user gesture is still in flight. By the time the microphone, the SDP exchange and ICE have finished, the tap on **Pick up** has long expired, so playback never started and the WebView drew its own grey play button over the dead video element. Desktop and mobile browsers don't hit this because they also allow playback on sites the user has already interacted with.
 
-Since v1.3.1 the video element **starts muted** — muted video autoplay is allowed even in the WebView — and the card unmutes it as soon as the audio track arrives. If the WebView refuses the unmute, you keep the picture and get a **"Tap to enable audio"** button; the tap is the gesture it was waiting for.
+Since v1.2.2 the video element **starts muted** — muted video autoplay is allowed even in the WebView — and the card unmutes it as soon as the audio track arrives. If the WebView refuses the unmute, you keep the picture and get a **"Tap to enable audio"** button; the tap is the gesture it was waiting for.
 
 You can also enable **Settings → Companion app → Autoplay videos** in the Android app, which turns that WebView restriction off globally (it affects Frigate and other WebRTC cards too — see [home-assistant/android#6578](https://github.com/home-assistant/android/issues/6578)).
 
