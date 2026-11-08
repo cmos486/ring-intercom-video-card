@@ -1,5 +1,5 @@
 /**
- * Ring Intercom Video Card - v1.3.2
+ * Ring Intercom Video Card - v1.4.0
  *
  * Two-way audio + video Lovelace card for Ring Intercom Video.
  * Companion to the ring-intercom-video custom component.
@@ -30,7 +30,7 @@
  * License: Apache-2.0
  */
 
-const CARD_VERSION = '1.3.2';
+const CARD_VERSION = '1.4.0';
 const CARD_TAG = 'ring-intercom-video-card';
 const EDITOR_TAG = 'ring-intercom-video-card-editor';
 const LOG_PREFIX = '[ring-intercom-video-card]';
@@ -63,6 +63,9 @@ const TRANSLATIONS = {
     mic_denied: 'Solo escucha: permiso de microfono denegado',
     mic_unavailable: 'Solo escucha: microfono no disponible',
     audio_unblock: 'Pulsa para activar el audio',
+    incoming_ring: 'Llamada entrante...',
+    editor_ring_label: 'Entidad de timbre (opcional, event.*)',
+    editor_ring_help: 'El card parpadea cuando alguien llama. Si se deja vacio, se busca el event.* de timbre del mismo dispositivo que la camara.',
     audio_only_title: 'Intercomunicador de audio',
     audio_only_hint: 'Este dispositivo no tiene camara',
     // Editor labels
@@ -103,6 +106,9 @@ const TRANSLATIONS = {
     mic_denied: 'Listen only: microphone permission denied',
     mic_unavailable: 'Listen only: microphone unavailable',
     audio_unblock: 'Tap to enable audio',
+    incoming_ring: 'Incoming ring...',
+    editor_ring_label: 'Ring event entity (optional, event.*)',
+    editor_ring_help: 'The card flashes when someone rings. Leave empty to auto-detect the ding event.* on the same device as the camera.',
     audio_only_title: 'Audio intercom',
     audio_only_hint: 'This device has no camera',
     editor_camera_label: 'Camera entity (required)',
@@ -142,6 +148,9 @@ const TRANSLATIONS = {
     mic_denied: 'Nomes escolta: permis de microfon denegat',
     mic_unavailable: 'Nomes escolta: microfon no disponible',
     audio_unblock: "Prem per activar l'audio",
+    incoming_ring: 'Trucada entrant...',
+    editor_ring_label: 'Entitat de timbre (opcional, event.*)',
+    editor_ring_help: "La targeta parpelleja quan algu truca. Si es deixa buit, es busca l'event.* de timbre del mateix dispositiu que la camera.",
     audio_only_title: "Intercomunicador d'audio",
     audio_only_hint: 'Aquest dispositiu no te camera',
     editor_camera_label: 'Entitat camera (requerit)',
@@ -229,6 +238,23 @@ function isAudioOnlyEntity(hass, entityId) {
   return hass?.states?.[entityId]?.attributes?.audio_only === true;
 }
 
+// Ring's integration exposes rings as an event.* entity whose state is the
+// timestamp of the last event, so any state change is a new ring. Prefer the
+// entity on the camera's own device that declares the 'ding' event type.
+function findRingEventEntity(hass, cameraId) {
+  const ents = hass?.entities;
+  const deviceId = ents?.[cameraId]?.device_id;
+  if (!deviceId) return null;
+  const candidates = Object.keys(ents).filter(
+    (id) => id.startsWith('event.') && ents[id].device_id === deviceId
+  );
+  return (
+    candidates.find((id) => (hass.states[id]?.attributes?.event_types || []).includes('ding')) ||
+    candidates.find((id) => id.endsWith('_ding')) ||
+    null
+  );
+}
+
 function resolveOpenDoorAction(config) {
   const action = config.open_door_action;
   if (action && (action.service || action.entity_id)) {
@@ -277,6 +303,10 @@ class RingIntercomVideoCard extends HTMLElement {
     this._lang = 'en';
     this._audioOnly = false;
     this._micError = null;
+    this._ringWatched = null;
+    this._ringState = undefined;
+    this._ringing = false;
+    this._ringTimer = null;
   }
 
   static async getConfigElement() {
@@ -344,6 +374,59 @@ class RingIntercomVideoCard extends HTMLElement {
     if (rendered && (langChanged || audioOnlyChanged)) {
       this._render();
     }
+    this._checkRing();
+  }
+
+  // ring_event_entity: false disables the indicator; a string pins the entity;
+  // anything else auto-detects it from the camera's device.
+  _ringEntityId() {
+    const cfg = this._config && this._config.ring_event_entity;
+    if (cfg === false) return null;
+    if (typeof cfg === 'string' && cfg) return cfg;
+    return findRingEventEntity(this._hass, this._config && this._config.entity);
+  }
+
+  _checkRing() {
+    if (!this._hass || !this._config) return;
+    const id = this._ringEntityId();
+    const stateObj = id ? this._hass.states[id] : null;
+    const st = stateObj ? stateObj.state : undefined;
+    // First sighting of an entity is a baseline, not a ring: the stored
+    // timestamp is whatever rang last, possibly days ago.
+    if (id !== this._ringWatched) { this._ringWatched = id; this._ringState = st; return; }
+    if (!id || st === this._ringState) return;
+    this._ringState = st;
+    if (!st || st === 'unavailable' || st === 'unknown') return;
+    const type = stateObj.attributes && stateObj.attributes.event_type;
+    if (type && type !== 'ding') return;
+    this._startRinging();
+  }
+
+  _startRinging() {
+    if (this._connecting || this._connected) return;
+    this._ringing = true;
+    clearTimeout(this._ringTimer);
+    const secs = Number(this._config.ring_timeout) > 0 ? Number(this._config.ring_timeout) : 30;
+    this._ringTimer = setTimeout(() => this._stopRinging(), secs * 1000);
+    this._applyRinging();
+    this._status(t(this._lang, 'incoming_ring'));
+  }
+
+  _stopRinging() {
+    clearTimeout(this._ringTimer);
+    this._ringTimer = null;
+    if (!this._ringing) return;
+    this._ringing = false;
+    this._applyRinging();
+    const el = this.shadowRoot.getElementById('status');
+    if (!this._connecting && !this._connected && el && el.textContent === t(this._lang, 'incoming_ring')) {
+      this._status(t(this._lang, 'idle'));
+    }
+  }
+
+  _applyRinging() {
+    const c = this.shadowRoot.querySelector('.container');
+    if (c) c.classList.toggle('ringing', this._ringing);
   }
 
   _refreshAudioOnly() {
@@ -438,6 +521,18 @@ class RingIntercomVideoCard extends HTMLElement {
         .start-btn { background: #1976d2; }
         .door-btn { background: #f57c00; }
         .hangup-btn { background: #c62828; }
+        @keyframes ring-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(25, 118, 210, 0.9); }
+          50% { box-shadow: 0 0 0 10px rgba(25, 118, 210, 0); }
+        }
+        @keyframes ring-blink { 50% { background: rgba(0, 0, 0, 0.6); } }
+        @keyframes ring-shake { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-15deg); } 75% { transform: rotate(15deg); } }
+        .ringing .start-btn { animation: ring-pulse 1s ease-out infinite; }
+        .ringing .overlay { background: #f57c00; font-weight: bold; animation: ring-blink 1s step-end infinite; }
+        .ringing .handset { animation: ring-shake 0.4s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .ringing .start-btn, .ringing .overlay, .ringing .handset { animation: none; }
+        }
       </style>
       <ha-card>
         <div class="container">${surface}
@@ -469,6 +564,8 @@ class RingIntercomVideoCard extends HTMLElement {
     const pttBtn = this.shadowRoot.getElementById('ptt');
     const doorBtn = this.shadowRoot.getElementById('door');
     const hangupBtn = this.shadowRoot.getElementById('hangup');
+
+    if (this._ringing) { this._applyRinging(); this._status(T('incoming_ring')); }
 
     startBtn.addEventListener('click', () => this._connect());
     hangupBtn.addEventListener('click', () => this._teardown());
@@ -640,6 +737,7 @@ class RingIntercomVideoCard extends HTMLElement {
     const T = (key) => t(this._lang, key);
     if (this._connecting || this._connected) return;
     this._connecting = true;
+    this._stopRinging();
     this._refreshAudioOnly();
     this._hideAudioUnblock();
     // Every call starts muted; _unmuteRemoteVideo() takes it from there.
@@ -844,6 +942,7 @@ class RingIntercomVideoCard extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._stopRinging();
     this._teardown();
   }
 }
@@ -1012,6 +1111,17 @@ class RingIntercomVideoCardEditor extends HTMLElement {
     }));
     cameraField.appendChild(this._makeHelpText(T('editor_camera_help')));
     container.appendChild(cameraField);
+
+    // Ring event entity (only a string is editable here; `false` stays YAML-only)
+    const ringField = document.createElement('div');
+    ringField.appendChild(this._makeEntityPicker({
+      value: typeof c.ring_event_entity === 'string' ? c.ring_event_entity : '',
+      label: T('editor_ring_label'),
+      domains: ['event'],
+      onChange: (v) => this._setConfigValue('ring_event_entity', v),
+    }));
+    ringField.appendChild(this._makeHelpText(T('editor_ring_help')));
+    container.appendChild(ringField);
 
     if (!adv) {
       const doorField = document.createElement('div');

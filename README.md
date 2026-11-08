@@ -18,6 +18,7 @@ This is the **frontend card**. It needs the companion backend custom integration
 - 📵 **Hang up** button (clean session teardown, releases mic and camera)
 - 🛠 **Visual editor** with entity pickers — no YAML needed
 - 🌍 **Multi-language UI** with auto-detection: Spanish, English, Catalan
+- 🔔 **Incoming-ring indicator**: the card flashes and the Pick up button pulses when someone rings (ding event auto-detected)
 - 📐 **Optional `video_max_height`** to fit small screens like the Echo Show 5
 - 🔌 Pure browser-side WebRTC, no `go2rtc`, no extra add-ons, no transcoding server
 - 🌐 Works on desktop and mobile browsers (with HTTPS)
@@ -111,7 +112,7 @@ If this step doesn't produce a camera entity, fix that first — the card will n
 To confirm it loaded, open the browser console (F12) — you should see a blue banner like:
 
 ```
- RING-INTERCOM-VIDEO-CARD  v1.3.2
+ RING-INTERCOM-VIDEO-CARD  v1.4.0
 ```
 
 ### 🔧 Manual installation (alternative)
@@ -157,6 +158,8 @@ The visual editor covers the typical cases, but here's the full schema for refer
 | `open_door_action.data` | object | — | Additional service data |
 | `language` | string | ❌ No | Force UI language: `es`, `en`, `ca`. If omitted, follows Home Assistant's language. |
 | `video_max_height` | string | ❌ No | Caps the video height with any CSS length (`px`, `vh`, `%`...). When set, the video uses `object-fit: contain` so it never deforms. If omitted, the video keeps its default size (no limit) — existing configs are unaffected. |
+| `ring_event_entity` | string \| `false` | ❌ No | `event.*` entity that fires on a ring. If omitted, the card finds the `ding` event entity on the camera's own device. Set `false` to disable the ring indicator. |
+| `ring_timeout` | number | ❌ No | How many seconds the ring indicator stays on (default `30`). It also stops as soon as you tap Pick up. |
 
 ### 🔓 Which service each entity gets
 
