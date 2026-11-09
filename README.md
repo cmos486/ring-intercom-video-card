@@ -16,8 +16,8 @@ This is the **frontend card**. It needs the companion backend custom integration
 - 🎤 **Two-way audio** with push-to-talk button
 - 🔓 **Open door** button (the Ring integration's `button.*` opener, a `lock.*`, or any custom service)
 - 📵 **Hang up** button (clean session teardown, releases mic and camera)
-- 🛠 **Visual editor** with entity pickers — no YAML needed
-- 🌍 **Multi-language UI** with auto-detection: Spanish, English, Catalan
+- 🛠 **Visual editor** built on Home Assistant's native form (`ha-form`) — no YAML needed
+- 🌍 **Multi-language UI** with auto-detection: Spanish, English, Catalan, French
 - 📐 **Optional `video_max_height`** to fit small screens like the Echo Show 5
 - 🔌 Pure browser-side WebRTC, no `go2rtc`, no extra add-ons, no transcoding server
 - 🌐 Works on desktop and mobile browsers (with HTTPS)
@@ -136,8 +136,9 @@ If you prefer not to use HACS:
 5. The **visual editor** will open:
    - 📹 **Camera entity**: pick the `camera.*` created by the backend integration
    - 🔓 **Open door entity** (optional): pick the entity that opens the door and the "Open door" button appears. With the **official Ring integration** that is the `button.*` **Open door** entity; with **ring-mqtt** it is the `lock.*`. A `script.*`, `switch.*`, `input_button.*`, `scene.*` or `cover.*` works too — the card calls the right service for that domain.
-   - 🌍 **Language** (optional): override the auto-detected language (defaults to your HA language)
-   - ⚙️ **Advanced** (toggle): instead of a single entity, you can call any service when "Open door" is pressed
+   - 🌍 **Language** (optional): override the auto-detected language. Clear it to follow your HA language again
+   - 📐 **Video max height** (optional): any CSS length, for small screens
+   - ⚙️ **Advanced** (expandable section): call any service when "Open door" is pressed. When set, it takes precedence over the open door entity
 6. Click **Save**
 
 ---
@@ -155,7 +156,7 @@ The visual editor covers the typical cases, but here's the full schema for refer
 | `open_door_action.service` | string | — | Service to call (e.g. `script.turn_on`, `automation.trigger`). Optional: if omitted, it is derived from `entity_id`. |
 | `open_door_action.entity_id` | string | — | Entity passed as `entity_id` to the service |
 | `open_door_action.data` | object | — | Additional service data |
-| `language` | string | ❌ No | Force UI language: `es`, `en`, `ca`. If omitted, follows Home Assistant's language. |
+| `language` | string | ❌ No | Force UI language: `es`, `en`, `ca`, `fr`. If omitted, follows Home Assistant's language. |
 | `video_max_height` | string | ❌ No | Caps the video height with any CSS length (`px`, `vh`, `%`...). When set, the video uses `object-fit: contain` so it never deforms. If omitted, the video keeps its default size (no limit) — existing configs are unaffected. |
 
 ### 🔓 Which service each entity gets
@@ -259,6 +260,7 @@ The card UI is available in:
 | 🇪🇸 `es` | Español |
 | 🇬🇧 `en` | English |
 | 🇪🇸 `ca` | Català |
+| 🇫🇷 `fr` | Français |
 
 **Auto-detection**: by default, the card reads `hass.locale.language` (or `hass.language`) and picks the matching translation. If your HA is set to Spanish, the card shows Spanish. If it's set to Italian (not supported yet), it falls back to English.
 
@@ -515,8 +517,8 @@ You're caching an old copy:
 
 ### 🌍 Card shows in English when my HA is in another language
 
-- If the language code is unsupported, the card falls back to English. Supported: `es`, `en`, `ca`. PRs welcome to add more
-- You can force a language by setting `language: es` (or `en`, `ca`) in the card config
+- If the language code is unsupported, the card falls back to English. Supported: `es`, `en`, `ca`, `fr`. PRs welcome to add more
+- You can force a language by setting `language: es` (or `en`, `ca`, `fr`) in the card config
 
 ---
 
@@ -529,7 +531,20 @@ Pull requests and issues welcome! When reporting a bug please include:
 - 🖥️ Console logs from the card (search for `[ring-intercom-video-card]`)
 - 🎟️ A description of what you expected vs. what happened
 
-To add a new language, edit `ring-intercom-video-card.js` and add a new key to the `TRANSLATIONS` constant. All keys must match the existing ones — see `en` for the canonical reference.
+To add a new language, edit `ring-intercom-video-card.js` and add a new key to the `TRANSLATIONS` constant. All keys must match the existing ones — see `en` for the canonical reference (the test suite checks this).
+
+### 🧪 Running the tests
+
+`tests/` holds an end-to-end suite that runs the real card in headless Chromium against a fake `hass` and a fake Ring peer. The fake peer is a real `RTCPeerConnection` that answers whatever the card offers, like Ring does (a tone on the audio m-line, a moving picture on the video m-line only if one was offered), so calls really negotiate WebRTC and carry media both ways. HA's `<ha-form>` is replaced by a stand-in that records the schema, so the editor is tested without the HA frontend.
+
+```bash
+cd tests
+npm install
+npx playwright install chromium
+npm test
+```
+
+Covered: translation completeness, language detection and override, video and audio-only calls (offered m-lines, media playback, push-to-talk reaching the far end), open door, hang-up, HA signalling errors, stub config detection and the visual editor.
 
 ---
 
