@@ -1,5 +1,5 @@
 /**
- * Ring Intercom Video Card - v1.3.2
+ * Ring Intercom Video Card - v1.4.0
  *
  * Two-way audio + video Lovelace card for Ring Intercom Video.
  * Companion to the ring-intercom-video custom component.
@@ -17,7 +17,7 @@
  *     service: script.turn_on             # optional, inferred from entity_id
  *     entity_id: script.xxx
  *     data: {...}
- *   language: es|en|ca                    # optional, overrides HA language auto-detection
+ *   language: es|en|ca|fr                 # optional, overrides HA language auto-detection
  *   video_max_height: 230px               # optional, caps video height (px, vh, %...)
  *
  * Legacy schema (auto-migrated):
@@ -30,7 +30,7 @@
  * License: Apache-2.0
  */
 
-const CARD_VERSION = '1.3.2';
+const CARD_VERSION = '1.4.0';
 const CARD_TAG = 'ring-intercom-video-card';
 const EDITOR_TAG = 'ring-intercom-video-card-editor';
 const LOG_PREFIX = '[ring-intercom-video-card]';
@@ -77,6 +77,8 @@ const TRANSLATIONS = {
     editor_action_entity_help: 'Entidad a la que se llama. Si el servicio esta vacio, se deduce de aqui.',
     editor_language_label: 'Idioma (opcional, sobrescribe el de HA)',
     editor_language_help: 'Idioma de los textos del card. Si se deja vacio, se usa el idioma de Home Assistant.',
+    editor_max_height_label: 'Altura maxima del video (opcional)',
+    editor_max_height_help: 'Cualquier longitud CSS (230px, 50vh...). Util en pantallas pequenas como el Echo Show 5.',
   },
   en: {
     idle: 'Idle',
@@ -116,6 +118,8 @@ const TRANSLATIONS = {
     editor_action_entity_help: 'Entity the service is called on. With an empty service, it is inferred from this.',
     editor_language_label: 'Language (optional, overrides HA language)',
     editor_language_help: 'Language for card texts. Leave empty to use Home Assistant language.',
+    editor_max_height_label: 'Video max height (optional)',
+    editor_max_height_help: 'Any CSS length (230px, 50vh...). Useful on small screens such as the Echo Show 5.',
   },
   ca: {
     idle: 'Inactiu',
@@ -155,6 +159,49 @@ const TRANSLATIONS = {
     editor_action_entity_help: 'Entitat a la qual es crida. Si el servei esta buit, es dedueix d\'aqui.',
     editor_language_label: 'Idioma (opcional, sobreescriu el d\'HA)',
     editor_language_help: "Idioma dels textos del card. Si es deixa buit, s'usa l'idioma de Home Assistant.",
+    editor_max_height_label: 'Alcada maxima del video (opcional)',
+    editor_max_height_help: 'Qualsevol longitud CSS (230px, 50vh...). Util en pantalles petites com l\'Echo Show 5.',
+  },
+  fr: {
+    idle: 'Inactif',
+    connecting: 'Connexion…',
+    requesting_mic: 'Demande d\'accès au micro…',
+    sending_offer: 'Envoi de l\'offre à HA…',
+    session: 'Session HA :',
+    answer_received: 'Réponse reçue',
+    pc_state: 'État PC :',
+    ptt_button: 'MAINTENIR POUR PARLER',
+    pick_up: 'Décrocher',
+    open_door: 'Ouvrir la porte',
+    hang_up: 'Raccrocher',
+    door_opened: 'Porte ouverte',
+    hung_up: 'Raccroché',
+    disconnected: 'Déconnecté',
+    error_opening: 'Erreur à l\'ouverture :',
+    door_not_configured: 'Ouverture de porte non configurée',
+    error_service: 'service mal formé',
+    error_prefix: 'Erreur :',
+    error_ha: 'Erreur HA :',
+    error_answer: 'Erreur dans la réponse :',
+    mic_insecure: 'Écoute seule : le micro nécessite HTTPS',
+    mic_denied: 'Écoute seule : accès au micro refusé',
+    mic_unavailable: 'Écoute seule : micro indisponible',
+    audio_unblock: 'Toucher pour activer le son',
+    audio_only_title: 'Interphone audio',
+    audio_only_hint: 'Cet appareil n\'a pas de caméra',
+    editor_camera_label: 'Entité caméra (requis)',
+    editor_camera_help: 'Entité caméra du composant Ring Intercom Video.',
+    editor_door_label: 'Entité d\'ouverture de porte (optionnel)',
+    editor_door_help: 'Avec l\'intégration Ring officielle, c\'est le bouton « Ouvrir la porte » (button.*) ; avec ring-mqtt, la serrure (lock.*). Un script ou un interrupteur marche aussi : la carte appelle le bon service.',
+    editor_advanced_toggle: 'Avancé : action personnalisée pour ouvrir la porte',
+    editor_advanced_help: 'N\'importe quel appel de service pour le bouton « Ouvrir la porte ». Si le service est vide, il est déduit du domaine de l\'entité.',
+    editor_service_label: 'Service (optionnel, ex. button.press, lock.unlock)',
+    editor_action_entity_label: 'Entité (optionnel)',
+    editor_action_entity_help: 'Entité sur laquelle le service est appelé. Si le service est vide, il est déduit d\'ici.',
+    editor_language_label: 'Langue (optionnel, remplace celle de HA)',
+    editor_language_help: 'Langue des textes de la carte. Vide = langue de Home Assistant.',
+    editor_max_height_label: 'Hauteur max de la vidéo (optionnel)',
+    editor_max_height_help: 'N\'importe quelle longueur CSS (230px, 50vh…). Utile sur les petits écrans comme l\'Echo Show 5.',
   },
 };
 
@@ -163,6 +210,7 @@ const LANGUAGE_NAMES = {
   es: 'Espanol',
   en: 'English',
   ca: 'Catala',
+  fr: 'Français',
 };
 
 function detectLanguage(hass, configLang) {
@@ -245,8 +293,11 @@ function resolveOpenDoorAction(config) {
   return null;
 }
 
+// The editor is a native <ha-form>, which HA only defines once some built-in
+// card editor has been loaded. Loading the entities card editor pulls it in
+// (together with the entity picker it renders).
 async function loadHaComponents() {
-  if (customElements.get('ha-entity-picker') && customElements.get('ha-textfield')) {
+  if (customElements.get('ha-form') && customElements.get('ha-entity-picker')) {
     return;
   }
   if (!customElements.get('hui-entities-card')) {
@@ -850,229 +901,133 @@ class RingIntercomVideoCard extends HTMLElement {
 
 // ---------- Visual Editor ----------
 
+// Built on HA's own <ha-form>, the same component the core card editors use.
+// The previous hand-rolled editor created ha-select / mwc-list-item elements
+// directly, which depends on frontend internals: on HA 2026.10 the language
+// dropdown rendered but could not be opened. ha-form keeps that churn on HA's
+// side, since its selectors ship with the frontend that renders them.
 class RingIntercomVideoCardEditor extends HTMLElement {
   constructor() {
     super();
     this._config = {};
-    this._showAdvanced = false;
-    this._isConnected = false;
     this._lang = 'en';
-  }
-
-  connectedCallback() {
-    this._isConnected = true;
-    this._renderIfReady();
+    this._form = null;
+    this._loading = false;
   }
 
   setConfig(config) {
     this._config = migrateConfig(config || {});
-    if (this._config.open_door_action) this._showAdvanced = true;
-    this._refreshLang();
-    this._renderIfReady();
+    this._update();
   }
 
   set hass(hass) {
-    const firstHass = !this._hass;
     this._hass = hass;
-    this._refreshLang();
-    if (firstHass) {
-      this._renderIfReady();
-    } else {
-      this.querySelectorAll('ha-entity-picker, ha-textfield').forEach((el) => {
-        el.hass = hass;
+    this._update();
+  }
+
+  connectedCallback() {
+    this._update();
+  }
+
+  async _update() {
+    if (!this._hass || !this.isConnected) return;
+    if (!this._form) {
+      if (this._loading) return;
+      this._loading = true;
+      await loadHaComponents();
+      // Never hang the editor if HA is slow to define ha-form.
+      await Promise.race([
+        customElements.whenDefined('ha-form'),
+        new Promise((r) => setTimeout(r, 3000)),
+      ]);
+      this._loading = false;
+      this._form = document.createElement('ha-form');
+      this._form.addEventListener('value-changed', (e) => {
+        e.stopPropagation();
+        this._valueChanged(e.detail.value);
       });
+      this.appendChild(this._form);
     }
-  }
-
-  _refreshLang() {
     this._lang = detectLanguage(this._hass, this._config.language);
+    this._form.hass = this._hass;
+    this._form.data = this._config;
+    this._form.schema = this._buildSchema();
+    this._form.computeLabel = (schema) => this._label(schema);
+    this._form.computeHelper = (schema) => this._helper(schema);
   }
 
-  async _renderIfReady() {
-    if (!this._isConnected || !this._hass) return;
-    await loadHaComponents();
-    this._render();
+  _T(key) {
+    return t(this._lang, key);
   }
 
-  _emitChange() {
+  _buildSchema() {
+    const languageOptions = Object.entries(LANGUAGE_NAMES)
+      .filter(([code]) => code)
+      .map(([value, label]) => ({ value, label }));
+    return [
+      { name: 'entity', required: true, selector: { entity: { domain: 'camera' } } },
+      { name: 'open_door_entity', selector: { entity: { domain: DOOR_ENTITY_DOMAINS } } },
+      // Not required, so HA shows a clear button: cleared = follow HA's language.
+      { name: 'language', selector: { select: { mode: 'dropdown', options: languageOptions } } },
+      { name: 'video_max_height', selector: { text: {} } },
+      {
+        type: 'expandable',
+        name: 'open_door_action',
+        icon: 'mdi:code-braces',
+        title: this._T('editor_advanced_toggle'),
+        expanded: !!this._config.open_door_action,
+        schema: [
+          { name: 'service', selector: { text: {} } },
+          { name: 'entity_id', selector: { entity: {} } },
+        ],
+      },
+    ];
+  }
+
+  _label(schema) {
+    const keys = {
+      entity: 'editor_camera_label',
+      open_door_entity: 'editor_door_label',
+      language: 'editor_language_label',
+      video_max_height: 'editor_max_height_label',
+      service: 'editor_service_label',
+      entity_id: 'editor_action_entity_label',
+    };
+    return keys[schema.name] ? this._T(keys[schema.name]) : schema.title || schema.name;
+  }
+
+  _helper(schema) {
+    const keys = {
+      entity: 'editor_camera_help',
+      open_door_entity: 'editor_door_help',
+      language: 'editor_language_help',
+      video_max_height: 'editor_max_height_help',
+      service: 'editor_advanced_help',
+      entity_id: 'editor_action_entity_help',
+    };
+    return keys[schema.name] ? this._T(keys[schema.name]) : undefined;
+  }
+
+  // Keep the saved YAML minimal: a cleared field removes its key instead of
+  // leaving `language: ""` or an empty open_door_action behind. Anything the
+  // form does not show (open_door_action.data, unknown keys) passes through.
+  _valueChanged(value) {
+    const isEmpty = (v) => v === undefined || v === null || v === '';
+    const out = { ...value };
+    Object.keys(out).forEach((k) => { if (isEmpty(out[k])) delete out[k]; });
+    if (out.open_door_action && typeof out.open_door_action === 'object') {
+      const action = { ...out.open_door_action };
+      Object.keys(action).forEach((k) => { if (isEmpty(action[k])) delete action[k]; });
+      if (Object.keys(action).length) out.open_door_action = action;
+      else delete out.open_door_action;
+    }
+    this._config = out;
+    this._update();
     this.dispatchEvent(new CustomEvent('config-changed', {
-      detail: { config: this._config },
+      detail: { config: out },
       bubbles: true,
       composed: true,
     }));
-  }
-
-  _setConfigValue(key, value) {
-    if (value === '' || value == null) {
-      const { [key]: _, ...rest } = this._config;
-      this._config = rest;
-    } else {
-      this._config = { ...this._config, [key]: value };
-    }
-    this._refreshLang();
-    this._emitChange();
-  }
-
-  _setActionValue(field, value) {
-    const current = { ...(this._config.open_door_action || {}) };
-    if (value === '' || value == null) delete current[field];
-    else current[field] = value;
-    if (Object.keys(current).length === 0) {
-      const { open_door_action: _, ...rest } = this._config;
-      this._config = rest;
-    } else {
-      this._config = { ...this._config, open_door_action: current };
-    }
-    this._emitChange();
-  }
-
-  _toggleAdvanced() {
-    this._showAdvanced = !this._showAdvanced;
-    // Opening the advanced box carries the simple entity over as a full
-    // action, so the service it was already using is there to edit instead of
-    // having to be guessed again.
-    if (this._showAdvanced && this._config.open_door_entity && !this._config.open_door_action) {
-      const entityId = this._config.open_door_entity;
-      const service = openDoorServiceFor(entityId);
-      const { open_door_entity: _, ...rest } = this._config;
-      this._config = {
-        ...rest,
-        open_door_action: service ? { service, entity_id: entityId } : { entity_id: entityId },
-      };
-      this._emitChange();
-    }
-    this._render();
-  }
-
-  _makeHelpText(text) {
-    const div = document.createElement('div');
-    div.style.cssText = 'font-size:12px; color:var(--secondary-text-color); margin-top:4px;';
-    div.textContent = text;
-    return div;
-  }
-
-  _makeEntityPicker({ value, label, domains, onChange }) {
-    const picker = document.createElement('ha-entity-picker');
-    picker.hass = this._hass;
-    picker.label = label;
-    picker.value = value || '';
-    if (domains && domains.length) picker.includeDomains = domains;
-    picker.allowCustomEntity = true;
-    picker.addEventListener('value-changed', (e) => { onChange(e.detail.value); });
-    return picker;
-  }
-
-  _makeTextField({ value, label, onInput }) {
-    const field = document.createElement('ha-textfield');
-    field.label = label;
-    field.value = value || '';
-    field.style.width = '100%';
-    field.addEventListener('input', (e) => { onInput(e.target.value); });
-    return field;
-  }
-
-  _makeLanguageSelect({ value, label, onChange }) {
-    const wrapper = document.createElement('div');
-    const select = document.createElement('ha-select');
-    select.label = label;
-    select.value = value || '';
-    select.style.width = '100%';
-    select.addEventListener('selected', (e) => { onChange(e.target.value); });
-    select.addEventListener('closed', (e) => e.stopPropagation());
-
-    Object.entries(LANGUAGE_NAMES).forEach(([code, name]) => {
-      const item = document.createElement('mwc-list-item');
-      item.value = code;
-      item.textContent = name;
-      select.appendChild(item);
-    });
-
-    wrapper.appendChild(select);
-    return wrapper;
-  }
-
-  _render() {
-    const T = (key) => t(this._lang, key);
-    while (this.firstChild) this.removeChild(this.firstChild);
-
-    const c = this._config;
-    const adv = this._showAdvanced;
-    const action = c.open_door_action || {};
-
-    const container = document.createElement('div');
-    container.style.cssText = 'display:flex; flex-direction:column; gap:16px; padding:8px 0;';
-
-    // Camera entity
-    const cameraField = document.createElement('div');
-    cameraField.appendChild(this._makeEntityPicker({
-      value: c.entity,
-      label: T('editor_camera_label'),
-      domains: ['camera'],
-      onChange: (v) => this._setConfigValue('entity', v),
-    }));
-    cameraField.appendChild(this._makeHelpText(T('editor_camera_help')));
-    container.appendChild(cameraField);
-
-    if (!adv) {
-      const doorField = document.createElement('div');
-      doorField.appendChild(this._makeEntityPicker({
-        value: c.open_door_entity,
-        label: T('editor_door_label'),
-        domains: DOOR_ENTITY_DOMAINS,
-        onChange: (v) => this._setConfigValue('open_door_entity', v),
-      }));
-      doorField.appendChild(this._makeHelpText(T('editor_door_help')));
-      container.appendChild(doorField);
-    }
-
-    // Language selector
-    const langField = document.createElement('div');
-    langField.appendChild(this._makeLanguageSelect({
-      value: c.language || '',
-      label: T('editor_language_label'),
-      onChange: (v) => this._setConfigValue('language', v),
-    }));
-    langField.appendChild(this._makeHelpText(T('editor_language_help')));
-    container.appendChild(langField);
-
-    // Advanced toggle
-    const toggle = document.createElement('div');
-    toggle.style.cssText = 'display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; padding:8px 0; color:var(--primary-text-color); font-size:14px;';
-    const chevron = document.createElement('span');
-    chevron.style.cssText = `display:inline-block; transition:transform 0.2s; transform:${adv ? 'rotate(90deg)' : 'rotate(0deg)'};`;
-    chevron.textContent = '▶';
-    const tlabel = document.createElement('span');
-    tlabel.textContent = T('editor_advanced_toggle');
-    toggle.appendChild(chevron);
-    toggle.appendChild(tlabel);
-    toggle.addEventListener('click', () => this._toggleAdvanced());
-    container.appendChild(toggle);
-
-    if (adv) {
-      const advBox = document.createElement('div');
-      advBox.style.cssText = 'padding:12px; border:1px solid var(--divider-color, #ccc); border-radius:8px; display:flex; flex-direction:column; gap:12px;';
-      const hint = document.createElement('div');
-      hint.style.cssText = 'font-size:12px; color:var(--secondary-text-color); font-style:italic;';
-      hint.textContent = T('editor_advanced_help');
-      advBox.appendChild(hint);
-      advBox.appendChild(this._makeTextField({
-        value: action.service,
-        label: T('editor_service_label'),
-        onInput: (v) => this._setActionValue('service', v),
-      }));
-      const entityWrap = document.createElement('div');
-      entityWrap.appendChild(this._makeEntityPicker({
-        value: action.entity_id,
-        label: T('editor_action_entity_label'),
-        domains: null,
-        onChange: (v) => this._setActionValue('entity_id', v),
-      }));
-      entityWrap.appendChild(this._makeHelpText(T('editor_action_entity_help')));
-      advBox.appendChild(entityWrap);
-      container.appendChild(advBox);
-    }
-
-    this.appendChild(container);
   }
 }
 
